@@ -6,7 +6,7 @@ import yaml
 def check():
     spec = yaml.safe_load(Path("openapi.yaml").read_text(encoding="utf-8"))
     assert spec["openapi"] == "3.1.0"
-    assert len(spec["paths"]) == 6
+    assert len(spec["paths"]) == 10
     def visit(value):
         if isinstance(value, dict):
             if "$ref" in value:
@@ -22,16 +22,22 @@ def check():
                 visit(child)
     visit(spec)
     for path, methods in spec["paths"].items():
-        operation = methods["get"]
+        operation = methods.get("get", methods.get("post"))
         parameters = [spec["components"]["parameters"][p["$ref"].split("/")[-1]] if "$ref" in p else p
-                      for p in operation["parameters"]]
+                      for p in operation.get("parameters", [])]
         names = {p["name"] for p in parameters}
-        assert {"from", "to", "period", "limit", "offset"} <= names
-        assert {"200", "400", "401", "503"} <= set(operation["responses"])
+        if not path.startswith("/v1/server"):
+            assert {"from", "to", "period", "limit", "offset"} <= names
+            assert {"200", "400", "401", "503"} <= set(operation["responses"])
+        else:
+            assert {"200", "400", "401"} <= set(operation["responses"])
+        if "post" in methods:
+            assert operation["requestBody"]["required"]
+            assert {"202", "403", "409", "501", "503"} <= set(operation["responses"])
         for p in parameters:
             if p["in"] == "path":
                 assert "{" + p["name"] + "}" in path and p["required"] is True
-    print("OpenAPI YAML, local references and all six operation contracts: OK")
+    print("OpenAPI YAML, local references and all ten operation contracts: OK")
 
 
 if __name__ == "__main__":

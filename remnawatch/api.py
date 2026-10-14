@@ -7,6 +7,7 @@ import re
 import sqlite3
 from urllib.parse import parse_qs, unquote, urlsplit
 from .events import domain_name
+from .management import Unsupported, Conflict
 
 
 def timestamp(value):
@@ -53,7 +54,7 @@ def dispatch(store, path, query):
     return store.query(mode=mode, **kwargs)
 
 
-def make_server(store, token, address=("127.0.0.1", 8080)):
+def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=None):
     if not isinstance(token, str) or len(token) < 32 or not token.isascii() or any(c.isspace() for c in token):
         raise ValueError("API token must contain at least 32 ASCII non-whitespace characters")
 
@@ -77,17 +78,36 @@ def make_server(store, token, address=("127.0.0.1", 8080)):
             self.end_headers()
             self.wfile.write(encoded)
 
-        def do_GET(self):
+        def authorized(self):
             headers = self.headers.get_all("Authorization", [])
             if len(headers) != 1 or not hmac.compare_digest(headers[0].encode(), ("Bearer " + token).encode()):
                 self.send_json(401, {"error": "unauthorized"})
+                return False
+            return True
+
+        def do_GET(self):
+            if not self.authorized():
                 return
             if len(self.path) > 4096:
                 self.send_json(400, {"error": "request too long"})
                 return
             try:
                 url = urlsplit(self.path)
-                result = dispatch(store, url.path, parse_qs(url.query, keep_blank_values=True, max_num_fields=16))
+                query = parse_qs(url.query, keep_blank_values=True, max_num_fields=16)
+                if url.path == "/v1/server" and manager and health:
+                    if query:
+                        raise ValueError("server snapshot takes no parameters")
+                    result = {"server": health.probe.snapshot(), "protection": health.status(), "management": manager.capabilities()}
+                elif url.path == "/v1/server/jobs" and manager:
+                    if set(query) - {"limit", "offset"} or any(len(v) != 1 for v in query.values()):
+                        raise ValueError("invalid job query")
+                    result = manager.jobs(limit=int(query.get("limit", [100])[0]), offset=int(query.get("offset", [0])[0]))
+                elif url.path.startswith("/v1/server/jobs/") and manager:
+                    if query:
+                        raise ValueError("job detail takes no parameters")
+                    result = manager.jobs(url.path.removeprefix("/v1/server/jobs/"))
+                else:
+                    result = dispatch(store, url.path, query)
                 self.send_json(200, result)
             except LookupError:
                 self.send_json(404, {"error": "not found"})
@@ -95,5 +115,44 @@ def make_server(store, token, address=("127.0.0.1", 8080)):
                 self.send_json(400, {"error": "invalid request parameters"})
             except sqlite3.OperationalError:
                 self.send_json(503, {"error": "query budget exceeded or storage busy"})
+
+        def do_POST(self):
+            if not self.authorized():
+                return
+            if self.path != "/v1/server/actions" or manager is None:
+                self.send_json(404, {"error": "not found"})
+                return
+            try:
+                if self.headers.get("Content-Type", "").split(";", 1)[0] != "application/json" or self.headers.get("Transfer-Encoding"):
+                    raise ValueError("JSON with Content-Length required")
+                lengths = self.headers.get_all("Content-Length", [])
+                if len(lengths) != 1:
+                    raise ValueError("one content length required")
+                length = int(lengths[0])
+                if not 1 <= length <= 8192:
+                    raise ValueError("invalid body size")
+                raw = self.rfile.read(length)
+                if len(raw) != length:
+                    raise ValueError("incomplete body")
+                def unique_pairs(pairs):
+                    result = {}
+                    for key, value in pairs:
+                        if key in result:
+                            raise ValueError("duplicate JSON field")
+                        result[key] = value
+                    return result
+                body = json.loads(raw, object_pairs_hook=unique_pairs)
+                result = manager.submit(body)
+                self.send_json(200 if result.get("dry_run") else 202, result)
+            except Unsupported as exc:
+                self.send_json(501, {"error": str(exc)})
+            except PermissionError as exc:
+                self.send_json(403, {"error": str(exc)})
+            except Conflict as exc:
+                self.send_json(409, {"error": str(exc)})
+            except (ValueError, UnicodeError, OverflowError, TypeError):
+                self.send_json(400, {"error": "invalid action request"})
+            except sqlite3.OperationalError:
+                self.send_json(503, {"error": "storage busy or unavailable"})
 
     return HTTPServer(address, Handler)

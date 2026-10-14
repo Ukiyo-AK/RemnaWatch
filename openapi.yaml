@@ -159,6 +159,106 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '503':
           $ref: '#/components/responses/Busy'
+  /v1/server:
+    get:
+      operationId: serverInfo
+      summary: Host characteristics, current load, resource alerts and configured management capabilities
+      responses:
+        '200':
+          description: Unknown Linux metrics are null; rates cover time since previous sample
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ServerStatus'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /v1/server/jobs:
+    get:
+      operationId: serverJobs
+      summary: Persistent administrative job audit
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Jobs sorted by creation time, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total, limit, offset]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ServerJob'}}
+                  total: {type: integer}
+                  limit: {type: integer}
+                  offset: {type: integer}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Busy'}
+  /v1/server/jobs/{id}:
+    get:
+      operationId: serverJob
+      summary: Inspect one job, including partial completion or failure
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Job status; succeeded does not guarantee remote node health
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ServerJob'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404':
+          description: Unknown job
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503': {$ref: '#/components/responses/Busy'}
+  /v1/server/actions:
+    post:
+      operationId: serverAction
+      summary: Preview or explicitly execute an allowlisted Linux action
+      description: >-
+        Shared admin Bearer token. Default dry_run=true executes no system commands.
+        Actual execution needs enabled config and unique request_id. One job at a time.
+        Reboot/restart/update interrupts connections. No automatic retry after restart.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ActionRequest'}
+      responses:
+        '200':
+          description: Dry-run plan only
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ActionPlan'}
+        '202':
+          description: Job queued or existing idempotent job returned
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ServerJob'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403':
+          description: Management disabled by configuration
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: Conflicting request ID, existing job, resource pressure or audit limit
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Unsupported OS or unconfigured action
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503': {$ref: '#/components/responses/Busy'}
 components:
   securitySchemes:
     BearerAuth:
@@ -321,6 +421,14 @@ components:
       required: [collection_enabled, registered_connections, domain_connections, domain_coverage, attributed_connections, complete, timestamp_precision, event_retention_days, aggregate_retention_days, period_truncated, collector_counters, sniffed_domain_export, traffic_semantics, limitations, connection_semantics]
       properties:
         collection_enabled: {type: boolean}
+        collection_paused: {type: boolean}
+        pause_reasons: {type: array, items: {type: string}}
+        emergency_retention:
+          type: [object, 'null']
+          properties:
+            timestamp: {type: integer}
+            removed: {type: object, additionalProperties: {type: integer}}
+            early_deletion: {type: boolean}
         registered_connections: {type: integer, description: Filtered aggregate-retention count before excluding IP-only from top}
         domain_connections: {type: integer}
         domain_coverage: {type: [number, 'null'], minimum: 0, maximum: 1}
@@ -340,3 +448,120 @@ components:
           type: array
           items: {type: string}
         connection_semantics: {type: string}
+    ActionRequest:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [server_reboot, xray_restart, xray_update, node_restart, node_update, os_kernel_update, traffic_limits, traffic_clear, oom_protection]
+        params:
+          type: object
+          additionalProperties: false
+          description: Traffic uses interface and both rates; OOM optionally service and both memory limits; all other actions take no params
+          properties:
+            interface: {type: string, maxLength: 15}
+            tx_mbps: {type: integer, minimum: 1, maximum: 100000}
+            rx_mbps: {type: integer, minimum: 1, maximum: 100000}
+            service: {type: string}
+            memory_high_mb: {type: integer, minimum: 16}
+            memory_max_mb: {type: integer, maximum: 1048576}
+        dry_run: {type: boolean, default: true}
+        request_id:
+          type: string
+          pattern: '^[a-zA-Z0-9_-]{8,80}$'
+          description: Required when dry_run=false; ID reused with different action/params gives 409
+    ActionPlan:
+      type: object
+      required: [action, params, scope, commands, warnings, execution_enabled, dry_run]
+      properties:
+        action: {type: string}
+        params: {type: object}
+        scope: {type: string}
+        commands: {type: array, items: {type: array, items: {type: string}}}
+        warnings: {type: array, items: {type: string}}
+        execution_enabled: {type: boolean}
+        dry_run: {type: boolean}
+    ServerJob:
+      type: object
+      required: [id, status, created, updated, plan, completed_steps]
+      properties:
+        id: {type: string}
+        status: {type: string, enum: [queued, running, succeeded, failed, interrupted]}
+        created: {type: integer}
+        updated: {type: integer}
+        plan: {$ref: '#/components/schemas/ActionPlan'}
+        completed_steps: {type: integer}
+        error: {type: string}
+        result: {type: string}
+        rollback: {type: string}
+    ServerStatus:
+      type: object
+      required: [server, protection, management]
+      properties:
+        server:
+          type: object
+          properties:
+            hostname: {type: string}
+            os: {type: string}
+            os_release: {type: string}
+            architecture: {type: string}
+            telemetry_scope: {type: string}
+            uptime_seconds: {type: [number, 'null']}
+            load_average: {type: [array, 'null'], items: {type: number}}
+            cpu:
+              type: object
+              properties:
+                logical_cpus: {type: [integer, 'null']}
+                model: {type: [string, 'null']}
+                usage_percent: {type: [number, 'null']}
+            memory:
+              type: object
+              properties:
+                total_bytes: {type: [integer, 'null']}
+                available_bytes: {type: [integer, 'null']}
+                used_percent: {type: [number, 'null']}
+                swap_total_bytes: {type: [integer, 'null']}
+                swap_free_bytes: {type: [integer, 'null']}
+            network:
+              type: array
+              items:
+                type: object
+                properties:
+                  interface: {type: string}
+                  rx_bytes: {type: integer}
+                  tx_bytes: {type: integer}
+                  rx_bytes_per_second: {type: [number, 'null']}
+                  tx_bytes_per_second: {type: [number, 'null']}
+            disks:
+              type: array
+              items:
+                type: object
+                properties:
+                  path: {type: string}
+                  total_bytes: {type: integer}
+                  used_bytes: {type: integer}
+                  free_bytes: {type: integer}
+                  used_percent: {type: number}
+                  free_inodes: {type: [integer, 'null']}
+                  error: {type: string}
+            oom:
+              type: object
+              properties:
+                panic_on_oom: {type: [string, 'null']}
+        protection:
+          type: object
+          properties:
+            alerts: {type: array, items: {type: object}}
+            collection_paused: {type: boolean}
+            pause_reasons: {type: array, items: {type: string}}
+            last_emergency_cleanup: {type: [object, 'null']}
+            guarantees_no_oom_reboot: {type: boolean, const: false}
+        management:
+          type: object
+          properties:
+            enabled: {type: boolean}
+            platform: {type: string}
+            actions: {type: object, additionalProperties: {type: object}}
+            availability_requires: {type: string}

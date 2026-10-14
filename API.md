@@ -37,6 +37,12 @@ History содержит Event: event_id, node_id, user_id, timestamp, domain, d
 
 `quality` считает наблюдаемые события в выбранном фильтре по aggregate retention, включая IP-only (для top тоже до исключения IP-only). Поэтому у history число registered_connections может превышать число доступных подробных записей. `domain_coverage` — доля доменных записей среди зарегистрированных, не доля всего трафика. `period_truncated` показывает выход за срок соответствующего хранения. Коллекторские счётчики общие за срок работы базы, не отфильтрованы по пользователю/периоду; объединённый unparsed_or_unmapped не позволяет вычислить полноту пользовательской истории. `complete=false` всегда, отсутствие событий не доказывает отсутствия активности.
 
-Ошибки JSON: 400 invalid request parameters; 401 unauthorized; 404 not found; 503 query budget exceeded or storage busy. Неизвестные/повторяющиеся query параметры отклоняются. Стандартный HTTP server возвращает 501 для неподдерживаемых методов; публичных write endpoints нет. Пагинация offset не является snapshot: при поступлении/удалении событий страницы могут смещаться.
+Ошибки JSON: 400 invalid request parameters; 401 unauthorized; 404 not found; 503 query budget exceeded or storage busy. Неизвестные/повторяющиеся query параметры отклоняются. Доменные write endpoints отсутствуют; управление сервером использует отдельный POST, описанный ниже. Пагинация offset не является snapshot: при поступлении/удалении событий страницы могут смещаться.
 
 Пример: `/v1/users/USER_UUID/domains/history?period=5m&limit=100&offset=0`, `/v1/domains?view=activity&bucket=hour&period=24h&node_id=node-1`.
+
+## Server API
+
+`GET /v1/server` возвращает характеристики/нагрузку, disk/memory alerts и configured capabilities. `GET /v1/server/jobs` с limit/offset и `GET /v1/server/jobs/{id}` возвращают аудит управления. `POST /v1/server/actions` принимает `{action, params?, dry_run?, request_id?}`; dry_run по умолчанию true (200), реальное выполнение требует management.enabled=true, dry_run=false и request_id (202). Дополнительные ошибки: 403 disabled, 409 conflict/pressure, 501 unsupported. Все endpoints защищены общим Bearer token и no-store. Детальные параметры, действия и ограничения: [SERVER_MANAGEMENT.md](SERVER_MANAGEMENT.md).
+
+Domain quality дополнена collection_paused, pause_reasons и emergency_retention (null либо timestamp/removed/early_deletion). Это отражает паузу при давлении памяти/диска и удаление истории раньше 7/30 дней. period_truncated по-прежнему показывает только настроенный retention cutoff; при аварийном удалении всегда дополнительно смотрите emergency_retention.

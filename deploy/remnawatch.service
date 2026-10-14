@@ -1,0 +1,21 @@
+[Unit]
+Description=RemnaWatch monitoring and optional Linux management
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/remnawatch
+EnvironmentFile=/etc/remnawatch/secrets.env
+ExecStart=/usr/bin/python3 -m remnawatch --config /etc/remnawatch/config.json
+Restart=on-failure
+RestartSec=5
+MemoryAccounting=yes
+MemoryHigh=256M
+MemoryMax=384M
+OOMPolicy=stop
+UMask=0077
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

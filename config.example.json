@@ -5,5 +5,26 @@
   "domains": {"enabled": true, "event_days": 7, "aggregate_days": 30, "purge_on_disable": true},
   "users": [{"node_id": "node-1", "inbound": "vless", "email": "xray-user-email", "user_id": "remnawave-user-uuid"}],
   "access_logs": [{"node_id": "node-1", "path": "/var/log/xray/access.log", "utc_offset_minutes": 0, "client_request_verified": false, "start_at_end": true, "batch_lines": 1000, "poll_seconds": 1}],
-  "network": []
+  "network": [],
+  "management": {
+    "enabled": false,
+    "compose_file": "/opt/remnanode/docker-compose.yml",
+    "compose_service": "remnanode",
+    "interfaces": ["eth0"],
+    "memory_services": ["remnawatch.service"],
+    "os_kernel_package": "linux-generic"
+  },
+  "protection": {
+    "memory_pause_percent": 92,
+    "memory_resume_percent": 85,
+    "disk_max_used_percent": 90,
+    "disk_min_free_bytes": 268435456,
+    "log_directories": ["/var/log/remnanode"],
+    "delete_rotated_logs": true,
+    "early_history_cleanup": true,
+    "min_rotated_age_seconds": 3600,
+    "keep_event_seconds": 3600,
+    "keep_aggregate_seconds": 86400,
+    "max_delete_files": 100
+  }
 }

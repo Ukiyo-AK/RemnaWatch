@@ -7,6 +7,11 @@
 | `remnawatch/collector.py` | Bounded polling, cursor, rotation, optional Linux interface load |
 | `remnawatch/api.py` | Общая Bearer-авторизация, шесть REST routes, фильтры и ошибки |
 | `remnawatch/__main__.py` | CLI, конфигурация, lifecycle коллектора/API/очистки |
+| `remnawatch/management.py` | Linux plans/actions, async job audit, idempotency, Docker/systemd/tc/sysctl |
+| `remnawatch/health.py` | Host telemetry, memory pressure guard, disk alerts и ранняя очистка |
+| `tests/test_server.py` | Synthetic telemetry, API auth, management fake runners, disk/memory/rollback tests |
+| `deploy/` | Примеры systemd service и persistent OOM sysctl для оператора |
+| `SERVER_MANAGEMENT.md` | Управление, характеристики сервера и защита ресурсов |
 | `config.example.json` | Пример node/user mapping и политики хранения |
 | `tests/test_domains.py` | Парсинг, attribution, filtering, history, auth, retention, volume/rotation |
 | `API.md`, `openapi.yaml` | Контракт REST |

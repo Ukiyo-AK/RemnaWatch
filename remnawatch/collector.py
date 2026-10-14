@@ -5,6 +5,7 @@ import os
 import stat
 import time
 import uuid
+import sqlite3
 
 
 class Tailer:
@@ -62,6 +63,8 @@ class Tailer:
         return accepted
 
     def poll(self):
+        if self.store.pause_reasons:
+            return 0  # Preserve cursor/backlog; unlike deliberate disabling, do not skip.
         if not self.handle:
             self._open()
         info = os.fstat(self.handle.fileno())
@@ -121,11 +124,17 @@ def run_collector(tailer, stop, interval=1.0):
     while not stop.is_set():
         try:
             tailer.poll()
-        except (OSError, ValueError):
-            tailer.store.count("collector_errors")
+        except (OSError, ValueError, sqlite3.Error):
+            try:
+                tailer.store.count("collector_errors")
+            except sqlite3.Error:
+                tailer.store.pause_reasons = tailer.store.pause_reasons | {"disk_pressure"}
             tailer.close()
         if time.monotonic() - last_cleanup >= 60:
-            tailer.store.maintain()
+            try:
+                tailer.store.maintain()
+            except sqlite3.Error:
+                tailer.store.pause_reasons = tailer.store.pause_reasons | {"disk_pressure"}
             last_cleanup = time.monotonic()
         stop.wait(interval)
     tailer.close()

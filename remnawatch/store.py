@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import sqlite3
 import threading
 import time
+import json
 
 
 @dataclass
@@ -53,8 +54,10 @@ class Store:
     def __init__(self, path, policy=None, clock=time.time):
         self.path, self.policy, self.clock = str(path), policy or Policy(), clock
         self.lock = threading.RLock()
+        self.pause_reasons = set()
         self.db = sqlite3.connect(self.path, check_same_thread=False, timeout=2)
         self.db.row_factory = sqlite3.Row
+        self.db.execute("PRAGMA auto_vacuum=INCREMENTAL")
         self.db.executescript(SCHEMA)
         self.db.execute("PRAGMA synchronous=NORMAL")
         self.db.execute("PRAGMA cache_size=-8192")
@@ -84,6 +87,8 @@ class Store:
         now = int(self.clock())
         accepted = 0
         with self.transaction() as db:
+            if self.pause_reasons:
+                return 0
             for e in events:
                 if not self.policy.enabled or e.timestamp < now - self.policy.aggregate_days * 86400 or e.timestamp > now + 60:
                     continue
@@ -103,6 +108,21 @@ class Store:
             if checkpoint:
                 db.execute("INSERT INTO state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", checkpoint)
         return accepted
+
+    def emergency_prune(self, keep_event_seconds=3600, keep_aggregate_seconds=86400, batch=2000):
+        """Bounded early deletion; reuse pages and release incremental-vacuum pages."""
+        now = int(self.clock())
+        removed = {}
+        with self.transaction() as db:
+            for table, keep in (("events", keep_event_seconds), ("aggregates", keep_aggregate_seconds), ("network", keep_aggregate_seconds)):
+                removed[table] = db.execute("DELETE FROM " + table + " WHERE rowid IN (SELECT rowid FROM " + table + " WHERE timestamp<? ORDER BY timestamp LIMIT ?)", (now - keep, batch)).rowcount
+            result = {"timestamp": now, "removed": removed, "early_deletion": True}
+            db.execute("INSERT INTO state VALUES ('emergency_retention',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(result),))
+        with self.lock:
+            self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            self.db.execute("PRAGMA incremental_vacuum(2000)")
+            self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return result
 
     def set_enabled(self, enabled):
         with self.lock:
@@ -127,7 +147,7 @@ class Store:
         if type(timestamp) is not int or not math.isfinite(bytes_per_second) or bytes_per_second < 0:
             raise ValueError("invalid network sample")
         with self.transaction() as db:
-            if not self.policy.enabled:
+            if not self.policy.enabled or self.pause_reasons:
                 return
             db.execute("INSERT OR REPLACE INTO network VALUES (?,?,?)", (timestamp, node_id, bytes_per_second))
 
@@ -205,6 +225,8 @@ class Store:
         return {"items": items, "total": total, "limit": limit, "offset": offset,
                 "period": {"from": start, "to": end},
                 "quality": {"collection_enabled": self.policy.enabled, "registered_connections": n,
+                            "collection_paused": bool(self.pause_reasons), "pause_reasons": sorted(self.pause_reasons),
+                            "emergency_retention": json.loads(self.state("emergency_retention", "null")),
                             "domain_connections": known, "domain_coverage": known / n if n else None,
                             "attributed_connections": attributed, "complete": False,
                             "timestamp_precision": "second", "event_retention_days": self.policy.event_days,

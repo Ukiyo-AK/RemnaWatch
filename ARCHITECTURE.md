@@ -37,3 +37,11 @@ AccessParser принимает только accepted TCP/UDP записи с em
 Сборщик читает не более batch_lines записей за poll; строки ограничены 8 KiB, память ограничена размером пакета. Oversized строки пропускаются bounded chunks. Нет синхронного вызова из Xray; медленная база увеличивает задержку мониторинга, а не блокирует подключение. SQLite cache 8 MiB, WAL, batch writes, индексы времени/user/domain, максимум 500 результатов и 100000 offset, SQL budget 2 секунды. REST-сервер последовательно обслуживает запросы; для внешнего доступа нужен reverse proxy с TLS, timeout, rate limits. Данные запросов не попадают в access log сервиса.
 
 Опциональный NetworkSampler читает `/proc/net/dev` раз в 5 секунд для явно выбранных интерфейсов. Он сохраняет host/node bytes per second, не payload. Активность и peak/average load сопоставляются по UTC bucket и node. Это контекст нагрузки, без причинного вывода и без распределения байтов по доменам. Нельзя одновременно включать интерфейсы, дублирующие одни и те же пакеты (например bridge и его member).
+
+## Server management и pressure guard
+
+`management.py` содержит whitelist действий Linux, dry-run planner, последовательный worker и persistent server_jobs. Команды запускаются argv без shell; команда из HTTP не принимается. Reboot/update доступны только при opt-in enabled и host root. На restart незавершённые jobs получают interrupted без replay. Аудит живёт отдельно от доменной истории, не удаляется отключением domain collection.
+
+`health.py` получает bounded /proc metrics и disk usage. Guard каждые 10 секунд независимо от Xray приостанавливает ingestion при давлении памяти/диска. Emergency retention удаляет старую историю пакетами; external rotated logs удаляются только из allowlisted directories, без активных/symlink/hardlink файлов. Alert state остаётся в памяти даже при ошибках SQLite; информация доступна через /v1/server. Новые SQLite базы используют incremental vacuum, без автоматического full VACUUM существующих баз. Удаление не даёт абсолютной гарантии освобождения диска.
+
+Подробности API, deployment, sysctl/systemd limits, tc ownership и границы безопасности: [SERVER_MANAGEMENT.md](SERVER_MANAGEMENT.md). Управляющие действия могут прерывать подключения по явному запросу оператора; фоновые guard/monitoring их не перезапускают.
