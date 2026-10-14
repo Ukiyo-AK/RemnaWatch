@@ -1,0 +1,342 @@
+openapi: 3.1.0
+info:
+  title: RemnaWatch Domain Activity API
+  version: 0.1.0
+  description: >-
+    Sensitive connection metadata. Registered events do not prove page visits.
+    UTC whole-second half-open intervals. Quality never guarantees complete coverage.
+servers:
+  - url: http://127.0.0.1:8080
+security:
+  - BearerAuth: []
+paths:
+  /v1/domains:
+    get:
+      operationId: listDomains
+      summary: Domain and destination IP statistics, including IP-only rows
+      parameters:
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Period'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/User'
+        - $ref: '#/components/parameters/Node'
+        - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/View'
+        - $ref: '#/components/parameters/Bucket'
+      responses:
+        '200':
+          $ref: '#/components/responses/Statistics'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/Busy'
+  /v1/domains/top:
+    get:
+      operationId: topDomains
+      summary: Domains ranked by registered connection count; IP-only excluded
+      parameters:
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Period'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/User'
+        - $ref: '#/components/parameters/Node'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          $ref: '#/components/responses/Statistics'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/Busy'
+  /v1/domains/{domain}/users:
+    get:
+      operationId: domainUsers
+      summary: Users with events for an exact normalized domain
+      parameters:
+        - name: domain
+          in: path
+          required: true
+          description: Unicode or IDNA hostname, normalized to lowercase without trailing dot; IPs rejected
+          schema: {type: string, maxLength: 253}
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Period'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/User'
+        - $ref: '#/components/parameters/Node'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          $ref: '#/components/responses/Statistics'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/Busy'
+  /v1/users/{id}/domains:
+    get:
+      operationId: userDomains
+      summary: User domain statistics or hourly/daily activity
+      parameters:
+        - $ref: '#/components/parameters/UserPath'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Period'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/User'
+        - $ref: '#/components/parameters/Node'
+        - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/View'
+        - $ref: '#/components/parameters/Bucket'
+      responses:
+        '200':
+          $ref: '#/components/responses/Statistics'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/Busy'
+  /v1/users/{id}/domains/history:
+    get:
+      operationId: userDomainHistory
+      summary: Detailed connection history or aggregated hourly/daily activity
+      description: >-
+        Details retained 7 days by default. view=activity uses aggregate retention
+        (30 days by default). Quality connection counts refer to aggregate retention.
+      parameters:
+        - $ref: '#/components/parameters/UserPath'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Period'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/User'
+        - $ref: '#/components/parameters/Node'
+        - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/View'
+        - $ref: '#/components/parameters/Bucket'
+      responses:
+        '200':
+          $ref: '#/components/responses/Statistics'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/Busy'
+  /v1/users/{id}/domains/top:
+    get:
+      operationId: userTopDomains
+      summary: User domains ranked by registered connections
+      parameters:
+        - $ref: '#/components/parameters/UserPath'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Period'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/User'
+        - $ref: '#/components/parameters/Node'
+        - $ref: '#/components/parameters/Search'
+      responses:
+        '200':
+          $ref: '#/components/responses/Statistics'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/Busy'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Shared service token, not a per-user token; panel backend enforces tenant access
+  parameters:
+    From:
+      name: from
+      in: query
+      description: Inclusive Unix UTC seconds or ISO8601 timezone timestamp; requires to, excludes period; no fractions
+      schema: {type: string}
+    To:
+      name: to
+      in: query
+      description: Exclusive UTC whole-second boundary; requires from; maximum range 365 days
+      schema: {type: string}
+    Period:
+      name: period
+      in: query
+      description: Relative to current UTC time; mutually exclusive with from/to
+      schema: {type: string, enum: [5m, 1h, 24h], default: 24h}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 500, default: 100}
+    Offset:
+      name: offset
+      in: query
+      description: Offset pagination does not provide snapshot isolation across requests
+      schema: {type: integer, minimum: 0, maximum: 100000, default: 0}
+    User:
+      name: user_id
+      in: query
+      description: Exact Remnawave ID; must match path user if present
+      schema: {type: string}
+    UserPath:
+      name: id
+      in: path
+      required: true
+      schema: {type: string}
+    Node:
+      name: node_id
+      in: query
+      schema: {type: string}
+    Search:
+      name: search
+      in: query
+      description: Case-normalized substring in stored IDNA domain
+      schema: {type: string, maxLength: 253}
+    View:
+      name: view
+      in: query
+      description: Optional aggregate activity view with contemporaneous node network context
+      schema: {type: string, enum: [activity]}
+    Bucket:
+      name: bucket
+      in: query
+      schema: {type: string, enum: [hour, day], default: hour}
+  responses:
+    Statistics:
+      description: Filtered and paginated results; unknown fields are null
+      headers:
+        Cache-Control:
+          schema: {type: string, const: no-store}
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Envelope'
+    BadRequest:
+      description: Invalid, unknown, repeated or conflicting parameters
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Unauthorized:
+      description: Missing or invalid shared Bearer token
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Busy:
+      description: Query interrupted by 2-second budget or storage busy
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: {type: string}
+    Envelope:
+      type: object
+      required: [items, total, limit, offset, period, quality]
+      properties:
+        items:
+          type: array
+          items:
+            anyOf:
+              - $ref: '#/components/schemas/Statistic'
+              - $ref: '#/components/schemas/Event'
+        total: {type: integer, minimum: 0}
+        limit: {type: integer}
+        offset: {type: integer}
+        period:
+          type: object
+          required: [from, to]
+          properties:
+            from: {type: integer}
+            to: {type: integer}
+        quality: {$ref: '#/components/schemas/Quality'}
+    Statistic:
+      type: object
+      required: [connections, first_seen, last_seen, measured_connections, bytes_transferred]
+      properties:
+        domain: {type: [string, 'null']}
+        destination_ip: {type: [string, 'null']}
+        user_id: {type: string}
+        bucket_start: {type: integer, description: UTC bucket start in Unix seconds}
+        connections: {type: integer, minimum: 1}
+        first_seen: {type: integer}
+        last_seen: {type: integer}
+        measured_connections: {type: integer, minimum: 0}
+        bytes_transferred:
+          type: [integer, 'null']
+          description: Present only when all included connections have exact measurements
+        network_load:
+          type: array
+          description: Node interface load; never attributed to this domain or user
+          items:
+            type: object
+            required: [node_id, average_bps, peak_bps, samples]
+            properties:
+              node_id: {type: string}
+              average_bps: {type: number}
+              peak_bps: {type: number}
+              samples: {type: integer}
+    Event:
+      type: object
+      required: [event_id, node_id, user_id, timestamp, domain, destination_ip, client_ip, protocol, destination_port, inbound, outbound, source, confidence, bytes_transferred, connections]
+      properties:
+        event_id: {type: string}
+        node_id: {type: string}
+        user_id: {type: string}
+        timestamp: {type: integer, description: Unix UTC seconds}
+        domain: {type: [string, 'null']}
+        destination_ip: {type: [string, 'null']}
+        client_ip: {type: [string, 'null'], description: Observed Xray peer address; may be reverse proxy}
+        protocol: {type: string, enum: [tcp, udp]}
+        destination_port: {type: integer, minimum: 1, maximum: 65535}
+        inbound: {type: string}
+        outbound: {type: string}
+        source:
+          type: string
+          enum: [client_request, http_host, tls_sni, quic_sni, fakedns, dns_metadata, xray_access, ip_only]
+        confidence: {type: string, enum: [observed, attributed, unknown]}
+        bytes_transferred: {type: [integer, 'null']}
+        connections: {type: integer, const: 1}
+    Quality:
+      type: object
+      required: [collection_enabled, registered_connections, domain_connections, domain_coverage, attributed_connections, complete, timestamp_precision, event_retention_days, aggregate_retention_days, period_truncated, collector_counters, sniffed_domain_export, traffic_semantics, limitations, connection_semantics]
+      properties:
+        collection_enabled: {type: boolean}
+        registered_connections: {type: integer, description: Filtered aggregate-retention count before excluding IP-only from top}
+        domain_connections: {type: integer}
+        domain_coverage: {type: [number, 'null'], minimum: 0, maximum: 1}
+        attributed_connections: {type: integer, description: Count with observed or attributed confidence}
+        complete: {type: boolean, const: false}
+        timestamp_precision: {type: string, const: second}
+        event_retention_days: {type: integer}
+        aggregate_retention_days: {type: integer}
+        period_truncated: {type: boolean}
+        collector_counters:
+          type: object
+          description: Global cumulative counters; not filtered by user or period
+          additionalProperties: {type: integer}
+        sniffed_domain_export: {type: string, const: unavailable_in_stock_xray}
+        traffic_semantics: {type: string, const: exact_measurements_only}
+        limitations:
+          type: array
+          items: {type: string}
+        connection_semantics: {type: string}

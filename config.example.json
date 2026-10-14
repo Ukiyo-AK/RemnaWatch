@@ -1,0 +1,9 @@
+{
+  "host": "127.0.0.1",
+  "port": 8080,
+  "database": "domains.sqlite",
+  "domains": {"enabled": true, "event_days": 7, "aggregate_days": 30, "purge_on_disable": true},
+  "users": [{"node_id": "node-1", "inbound": "vless", "email": "xray-user-email", "user_id": "remnawave-user-uuid"}],
+  "access_logs": [{"node_id": "node-1", "path": "/var/log/xray/access.log", "utc_offset_minutes": 0, "client_request_verified": false, "start_at_end": true, "batch_lines": 1000, "poll_seconds": 1}],
+  "network": []
+}
