@@ -10,6 +10,126 @@ servers:
 security:
   - BearerAuth: []
 paths:
+  /v1/capabilities:
+    get:
+      operationId: telemetryCapabilities
+      summary: Separate supported, configured and healthy telemetry sources
+      responses:
+        '200':
+          description: No per-flow capability is inferred from user totals or access logs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [api_version, capabilities]
+                properties:
+                  api_version: {type: string, const: v1}
+                  capabilities:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      required: [supported, configured, healthy]
+                      properties:
+                        supported: {type: boolean}
+                        configured: {type: boolean}
+                        healthy: {type: [boolean, 'null']}
+                        measurement_scope: {type: string}
+                        user_attribution: {type: boolean}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /v1/diagnostics/sources:
+    get:
+      operationId: telemetrySourceDiagnostics
+      summary: Redacted source health, lag, permissions and observation gaps
+      responses:
+        '200':
+          description: No raw log, token, domain, IP or full configuration in diagnostic source status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [diagnostics_version, sampled_at, sources, storage, sensitive_fields_redacted]
+                properties:
+                  diagnostics_version: {type: integer, const: 2}
+                  sampled_at: {type: number}
+                  sources: {type: array, items: {type: object}}
+                  storage: {type: [object, 'null']}
+                  sensitive_fields_redacted: {type: boolean, const: true}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /v1/network/interfaces:
+    get:
+      operationId: networkInterfaces
+      summary: Read-only current namespace interface inventory; no implicit aggregation
+      responses:
+        '200':
+          description: Interface type, ifindex, state, master, members, loopback, default route and driver-reported link speed when available
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  aggregation: {type: string, const: none}
+                  items: {type: array, items: {type: object}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /v1/connections/live:
+    get:
+      operationId: liveSocketSnapshot
+      summary: Frozen snapshot of visible kernel transport sockets, not attributed Xray user streams
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/FlowUser'
+        - $ref: '#/components/parameters/FlowInbound'
+        - $ref: '#/components/parameters/FlowProtocol'
+        - $ref: '#/components/parameters/FlowState'
+        - name: snapshot_id
+          in: query
+          description: Required when offset is nonzero; expired/evicted snapshot returns 409, never silently restarts pagination
+          schema: {type: string}
+      responses:
+        '200': {$ref: '#/components/responses/LivePage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/Resync'}
+  /v1/connections/changes:
+    get:
+      operationId: liveSocketChanges
+      summary: Bounded change feed including removal tombstones; use cursor from completed full snapshot
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/FlowUser'
+        - $ref: '#/components/parameters/FlowInbound'
+        - $ref: '#/components/parameters/FlowProtocol'
+        - $ref: '#/components/parameters/FlowState'
+        - name: cursor
+          in: query
+          description: Opaque boot/collector-epoch/sequence cursor; absent cursor starts at current tail with no backlog
+          schema: {type: string, maxLength: 256}
+      responses:
+        '200': {$ref: '#/components/responses/LivePage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/Resync'}
+  /v1/connections/{id}:
+    get:
+      operationId: liveSocketDetail
+      summary: One observed socket or retained tombstone; disappearance is not proof of closure
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {$ref: '#/components/responses/LivePage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404':
+          description: Unknown or expired connection ID
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
   /v1/node:
     get:
       operationId: verifyNodeConnection
@@ -293,6 +413,25 @@ components:
         Config credential overrides legacy REMNAWATCH_API_TOKEN. Not a per-user token;
         panel backend enforces tenant/admin access. TLS or a protected channel is required.
   parameters:
+    FlowUser:
+      name: user_id
+      in: query
+      description: Exact verified Remnawave UUID; socket adapter assigns no user, so a supplied user filter returns no records
+      schema: {type: string}
+    FlowInbound:
+      name: inbound
+      in: query
+      description: Exact inbound; unavailable in socket adapter, never inferred from NAT/IP/port
+      schema: {type: string}
+    FlowProtocol:
+      name: protocol
+      in: query
+      schema: {type: string, enum: [tcp, udp]}
+    FlowState:
+      name: state
+      in: query
+      description: Change feed also returns exit transitions previously in this state so filtered replicas can remove them
+      schema: {type: string, enum: [active, closed, unknown]}
     From:
       name: from
       in: query
@@ -346,6 +485,25 @@ components:
       in: query
       schema: {type: string, enum: [hour, day], default: hour}
   responses:
+    LivePage:
+      description: All times are observed agent wall-clock timestamps, not inferred socket creation times; byte fields unsupported
+      headers:
+        Cache-Control:
+          schema: {type: string, const: no-store}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/LiveEnvelope'}
+    Resync:
+      description: Cursor, snapshot or collector epoch lost; discard replica and fetch a new complete snapshot
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error, resync_required, remediation]
+            properties:
+              error: {type: string, const: cursor_or_snapshot_expired}
+              resync_required: {type: boolean, const: true}
+              remediation: {type: string}
     Statistics:
       description: Filtered and paginated results; unknown fields are null
       headers:
@@ -371,6 +529,75 @@ components:
         application/json:
           schema: {$ref: '#/components/schemas/Error'}
   schemas:
+    LiveEnvelope:
+      type: object
+      required: [items, agent_boot_id, collector_epoch, next_cursor, has_more, sampled_at, snapshot_id, resync_required, source]
+      properties:
+        items:
+          type: array
+          items:
+            anyOf:
+              - $ref: '#/components/schemas/LiveRecord'
+              - type: object
+                required: [sequence, kind, record, tombstone, previous_state]
+                properties:
+                  sequence: {type: integer}
+                  kind: {type: string, enum: [created, updated, closed, removed]}
+                  tombstone: {type: boolean}
+                  previous_state: {type: [string, 'null']}
+                  record: {$ref: '#/components/schemas/LiveRecord'}
+        agent_boot_id: {type: string, format: uuid}
+        collector_epoch: {type: string, format: uuid}
+        next_cursor: {type: string}
+        has_more: {type: boolean}
+        sampled_at: {type: [number, 'null']}
+        snapshot_id: {type: [string, 'null']}
+        resync_required: {type: boolean, const: false}
+        source: {type: object}
+        limit: {type: integer, maximum: 500}
+        offset: {type: integer}
+        total: {type: integer}
+    LiveRecord:
+      type: object
+      required: [node_id, agent_boot_id, connection_id, user_id, protocol, state, measurement_scope, source, confidence, unavailable_reason]
+      properties:
+        node_id: {type: [string, 'null']}
+        agent_boot_id: {type: string, format: uuid}
+        connection_id: {type: string}
+        user_id: {type: [string, 'null']}
+        inbound: {type: [string, 'null']}
+        protocol: {type: string, enum: [tcp, udp]}
+        transport_stream_id: {type: [string, 'null']}
+        client_ip: {type: [string, 'null']}
+        client_port: {type: [integer, 'null']}
+        destination_ip: {type: [string, 'null']}
+        destination_port: {type: [integer, 'null']}
+        local_ip: {type: [string, 'null']}
+        local_port: {type: [integer, 'null']}
+        peer_ip: {type: [string, 'null']}
+        peer_port: {type: [integer, 'null']}
+        domain: {type: [string, 'null']}
+        domain_source: {type: [string, 'null']}
+        confidence: {type: string}
+        state: {type: string, enum: [active, closed, unknown]}
+        kernel_state: {type: integer}
+        started_at: {type: [number, 'null']}
+        first_observed_at: {type: number}
+        last_seen_at: {type: number}
+        closed_at: {type: [number, 'null']}
+        duration_seconds: {type: [number, 'null']}
+        rx_bytes: {type: [integer, 'null']}
+        tx_bytes: {type: [integer, 'null']}
+        rx_bytes_per_second: {type: [number, 'null']}
+        tx_bytes_per_second: {type: [number, 'null']}
+        measured_at: {type: number}
+        sample_interval_seconds: {type: [number, 'null']}
+        measurement_scope: {type: string, const: transport_socket}
+        source: {type: string, const: linux_inet_diag_v1}
+        byte_direction: {type: string, const: node_socket}
+        timestamp_origin: {type: string, const: agent_poll_wall_clock}
+        timestamp_precision: {type: string}
+        unavailable_reason: {type: object, additionalProperties: {type: string}}
     Error:
       type: object
       required: [error]
@@ -449,6 +676,7 @@ components:
       properties:
         collection_enabled: {type: boolean}
         collection_paused: {type: boolean}
+        history_storage_available: {type: boolean}
         pause_reasons: {type: array, items: {type: string}}
         emergency_retention:
           type: [object, 'null']
@@ -561,6 +789,12 @@ components:
                   tx_bytes: {type: integer}
                   rx_bytes_per_second: {type: [number, 'null']}
                   tx_bytes_per_second: {type: [number, 'null']}
+                  available: {type: boolean}
+                  sampled_at: {type: number}
+                  sample_interval_seconds: {type: [number, 'null']}
+                  counter_reset: {type: boolean}
+                  error_code: {type: [string, 'null']}
+                  origin: {type: string, enum: [host, container, unknown]}
             disks:
               type: array
               items:

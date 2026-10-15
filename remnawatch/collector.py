@@ -21,6 +21,8 @@ class Tailer:
         self.position = 0
         self.anchor = ""
         self.discarding = False
+        self.gaps = 0
+        self.last_gap_reason = None
 
     def close(self):
         if self.handle:
@@ -46,8 +48,16 @@ class Tailer:
             else:
                 position = 0
                 self.store.count("rotation_gaps")
+                self.gaps += 1
+                self.last_gap_reason = "log_rewritten_or_truncated"
         elif saved is None and self.start_at_end:
             position = info.st_size
+        if saved and saved.get("mapping_fingerprint") != self.parser.mapping_fingerprint:
+            position, generation = info.st_size, uuid.uuid4().hex
+            self.discarding = False
+            self.gaps += 1
+            self.last_gap_reason = "mapping_changed_backlog_skipped"
+            self.store.count("mapping_changes")
         self.handle, self.identity, self.generation, self.position = handle, identity, generation, position
         handle.seek(position)
         self._checkpoint([])
@@ -57,7 +67,8 @@ class Tailer:
         anchor = hashlib.sha256(self.handle.read(min(self.position, 128))).hexdigest()
         self.handle.seek(self.position)
         value = json.dumps({"identity": self.identity, "generation": self.generation,
-                            "position": self.position, "anchor": anchor, "discarding": self.discarding})
+                            "position": self.position, "anchor": anchor, "discarding": self.discarding,
+                            "mapping_fingerprint": self.parser.mapping_fingerprint})
         accepted = self.store.ingest(events, (self.key, value))
         self.anchor = anchor
         return accepted
@@ -75,6 +86,8 @@ class Tailer:
             self.generation = uuid.uuid4().hex
             self.discarding = False
             self.store.count("rotation_gaps")
+            self.gaps += 1
+            self.last_gap_reason = "log_rewritten_or_truncated"
         self.handle.seek(self.position)
         if not self.store.policy.enabled:
             self.position = info.st_size
@@ -119,12 +132,18 @@ class Tailer:
         return result
 
 
-def run_collector(tailer, stop, interval=1.0):
+def run_collector(tailer, stop, interval=1.0, diagnostics=None, source_index=None):
     last_cleanup = 0
     while not stop.is_set():
         try:
             tailer.poll()
-        except (OSError, ValueError, sqlite3.Error):
+            if diagnostics is not None:
+                lag = max(0, os.fstat(tailer.handle.fileno()).st_size - tailer.position) if tailer.handle else None
+                diagnostics.event_result(source_index, error="collection_paused" if tailer.store.pause_reasons else None, lag_bytes=lag,
+                                         gaps=tailer.gaps, gap_reason=tailer.last_gap_reason)
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            if diagnostics is not None:
+                diagnostics.event_result(source_index, error="permission_denied" if isinstance(exc, PermissionError) else "source_missing" if isinstance(exc, FileNotFoundError) else "source_or_storage_unavailable")
             try:
                 tailer.store.count("collector_errors")
             except sqlite3.Error:

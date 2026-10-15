@@ -3,6 +3,10 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timezone, timedelta
 import ipaddress
 import re
+import uuid
+import json
+import hashlib
+from types import MappingProxyType
 
 
 def domain_name(value):
@@ -86,7 +90,7 @@ class Event:
 
 class UserMap:
     """Exact node + inbound + Xray email mapping, no client-IP inference."""
-    def __init__(self, entries):
+    def __init__(self, entries, require_uuid=False):
         self.entries = {}
         for row in entries:
             key = (row["node_id"], row["inbound"], row["email"])
@@ -95,6 +99,14 @@ class UserMap:
             if not all(isinstance(v, str) and v for v in (*key, row["user_id"])):
                 raise ValueError("invalid user mapping")
             self.entries[key] = row["user_id"]
+            if require_uuid:
+                try:
+                    identity = uuid.UUID(row["user_id"])
+                except ValueError:
+                    raise ValueError("user_id must be the persistent Remnawave UUID") from None
+                if str(identity) != row["user_id"] or identity.int == 0:
+                    raise ValueError("user_id must be a nonzero canonical Remnawave UUID")
+        self.entries = MappingProxyType(self.entries)
 
     def resolve(self, node, inbound, email):
         return self.entries.get((node, inbound, email))
@@ -114,6 +126,8 @@ class AccessParser:
         self.node_id, self.users = node_id, users
         self.tz = timezone(timedelta(minutes=utc_offset_minutes))
         self.client_request_verified = client_request_verified
+        mapping = sorted([*key, value] for key, value in users.entries.items() if key[0] == node_id)
+        self.mapping_fingerprint = hashlib.sha256(json.dumps(mapping, separators=(",", ":")).encode()).hexdigest()
 
     def parse(self, line, event_id):
         if len(line) > 8192:

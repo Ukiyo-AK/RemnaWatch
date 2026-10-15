@@ -15,5 +15,7 @@ API по умолчанию: `127.0.0.1:8080`, отдельный Bearer token �
 
 Добавлены характеристики/нагрузка сервера, memory/disk alerts, ранняя очистка истории/rotated logs и Linux управление: OS reboot, Xray/node restart/update, OS kernel upgrade, TX/RX limits, OOM protection. Управление по умолчанию выключено; действия поддерживают dry-run и журнал jobs. Полная инструкция и примеры: [SERVER_MANAGEMENT.md](SERVER_MANAGEMENT.md), systemd/sysctl примеры — [deploy/](deploy/).
 
+Диагностика источников: `GET /v1/capabilities`, `GET /v1/diagnostics/sources`, `GET /v1/network/interfaces`. Optional live adapter `linux_inet_diag` выключен по умолчанию и показывает **сокеты ОС**, без вымышленной привязки к пользователям Xray. Снимки/changes имеют stable ID, bounded polling и явный resync. Настройка, compatibility matrix и rollback: [LIVE_DIAGNOSTICS.md](LIVE_DIAGNOSTICS.md). Реальные Linux и synthetic результаты: [TEST_REPORT_LIVE.md](TEST_REPORT_LIVE.md).
+
 Модуль не изменяет Xray и не перехватывает payload. Полнота доменов ограничена источниками; универсальный экспорт sniffed domain в исследованном штатном Xray отсутствует. Соединение не означает посещение веб-страницы.
 

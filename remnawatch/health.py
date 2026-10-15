@@ -7,14 +7,17 @@ import shutil
 import stat
 import threading
 import time
+import errno
+from .network import NetworkProbe
 
 
 class HostProbe:
-    def __init__(self, proc="/proc", disk_paths=(), clock=time.monotonic):
+    def __init__(self, proc="/proc", disk_paths=(), clock=time.monotonic, sys="/sys", origin="unknown"):
         self.proc, self.disk_paths, self.clock = Path(proc), list(disk_paths), clock
         self.previous_cpu = None
         self.previous_net = None
         self.lock = threading.Lock()
+        self.network_probe = NetworkProbe(proc, sys, clock, origin=origin)
 
     def text(self, name):
         try:
@@ -50,28 +53,7 @@ class HostProbe:
                     if delta > 0:
                         cpu["usage_percent"] = max(0, min(100, 100 * (1 - idle / delta)))
                 self.previous_cpu = current
-            network = []
-            now = self.clock()
-            current_net = {}
-            for line in self.text("net/dev").splitlines():
-                if ":" not in line:
-                    continue
-                name, data = line.split(":", 1)
-                fields = data.split()
-                if len(fields) < 16:
-                    continue
-                name = name.strip()
-                rx, tx = int(fields[0]), int(fields[8])
-                current_net[name] = (rx, tx)
-                row = {"interface": name, "rx_bytes": rx, "tx_bytes": tx,
-                       "rx_bytes_per_second": None, "tx_bytes_per_second": None}
-                if self.previous_net:
-                    then, old = self.previous_net
-                    if now > then and name in old and rx >= old[name][0] and tx >= old[name][1]:
-                        row["rx_bytes_per_second"] = (rx - old[name][0]) / (now - then)
-                        row["tx_bytes_per_second"] = (tx - old[name][1]) / (now - then)
-                network.append(row)
-            self.previous_net = (now, current_net)
+            network, interfaces = self.network_probe.sample()
             disks = []
             for path in dict.fromkeys(self.disk_paths):
                 try:
@@ -87,15 +69,16 @@ class HostProbe:
                     "architecture": platform.machine(), "cpu": cpu, "memory": memory,
                     "load_average": list(os.getloadavg()) if hasattr(os, "getloadavg") else None,
                     "uptime_seconds": float(uptime[0]) if uptime else None,
-                    "network": network, "disks": disks,
+                    "network": network, "interfaces": interfaces, "disks": disks,
                     "oom": {"panic_on_oom": self.text("sys/vm/panic_on_oom").strip() or None},
                     "telemetry_scope": "this process host/namespace; run on the node host for host metrics"}
 
 
 class PressureGuard:
-    def __init__(self, store, settings=None, active_logs=(), probe=None, disk_usage=shutil.disk_usage):
+    def __init__(self, store, settings=None, active_logs=(), probe=None, disk_usage=shutil.disk_usage, required_logs=()):
         self.store, self.settings = store, settings or {}
         self.active_logs = {Path(p).resolve() for p in active_logs}
+        self.required_logs = {Path(p).resolve() for p in required_logs}
         self.roots = [Path(p).resolve() for p in self.settings.get("log_directories", [])]
         self.probe = probe or HostProbe(disk_paths=[str(Path(store.path).resolve().parent), *map(str, self.roots)])
         self.disk_usage = disk_usage
@@ -163,13 +146,34 @@ class PressureGuard:
             dbroot = Path(self.store.path).resolve().parent
             deleted = 0
             for root in self.roots:
+                required = self.store.policy.enabled and any(p == root or root in p.parents for p in self.required_logs)
+                enabled = self.store.policy.enabled and any(p == root or root in p.parents for p in self.active_logs)
+                stage = "check"
                 try:
+                    if not stat.S_ISDIR(root.stat().st_mode):
+                        raise NotADirectoryError(errno.ENOTDIR, "log path is not a directory")
                     if self._low_disk(root):
-                        alerts.append({"code": "log_disk_pressure", "severity": "critical", "path": str(root)})
+                        alerts.append({"component": "log_storage", "code": "log_disk_pressure",
+                                       "severity": "critical" if required else "warning" if enabled else "info", "path": str(root),
+                                       "error_type": None, "errno": None, "required": bool(required),
+                                       "impact": "log_writes_may_fail" if enabled else "optional_source_disabled",
+                                       "remediation": "Review rotated-log retention and free space on this mount"})
                         if self.settings.get("delete_rotated_logs", True):
+                            stage = "cleanup"
                             deleted += self._clean_rotated(root)
-                except OSError:
-                    alerts.append({"code": "log_storage_unavailable", "severity": "critical", "path": str(root)})
+                except OSError as exc:
+                    code = "log_directory_missing" if exc.errno == errno.ENOENT and stage == "check" else "log_directory_permission_denied" if exc.errno in (errno.EACCES, errno.EPERM) and stage == "check" else "log_directory_read_only" if exc.errno == errno.EROFS else "log_cleanup_failed" if stage == "cleanup" else "log_storage_io_error"
+                    remedy = {"log_directory_missing": "Verify the configured host mount/path and the real Xray log source; do not create an empty substitute",
+                              "log_directory_permission_denied": "Grant the service account access to the configured log directory",
+                              "log_directory_read_only": "Check mount write permissions; disable rotated-log deletion if intentional",
+                              "log_cleanup_failed": "Check ownership and permissions of rotated logs; host monitoring remains available",
+                              "log_storage_io_error": "Check filesystem and mount health"}[code]
+                    alerts.append({"component": "log_storage", "code": code, "legacy_code": "log_storage_unavailable",
+                                   "severity": "critical" if required else "warning" if enabled else "info",
+                                   "path": str(root), "error_type": type(exc).__name__,
+                                   "errno": exc.errno if exc.errno in errno.errorcode else None,
+                                   "required": bool(required), "impact": "optional_source_disabled" if not enabled else "connection_event_source_unavailable" if stage == "check" else "early_log_cleanup_unavailable",
+                                   "remediation": remedy})
             try:
                 if self._low_disk(dbroot):
                     alerts.append({"code": "history_disk_pressure", "severity": "critical", "path": str(dbroot)})
@@ -193,6 +197,8 @@ class PressureGuard:
     def status(self):
         with self.lock:
             return {"alerts": list(self.alerts), "collection_paused": bool(self.store.pause_reasons),
+                    "diagnostics_version": 2,
+                    "legacy_alerts": [{**a, "code": a.get("legacy_code", a["code"])} for a in self.alerts],
                     "pause_reasons": sorted(self.store.pause_reasons), "last_emergency_cleanup": self.last_cleanup,
                     "guarantees_no_oom_reboot": False}
 

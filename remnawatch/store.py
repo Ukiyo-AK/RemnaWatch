@@ -55,6 +55,7 @@ class Store:
         self.path, self.policy, self.clock = str(path), policy or Policy(), clock
         self.lock = threading.RLock()
         self.pause_reasons = set()
+        self.persistence_available = True
         self.db = sqlite3.connect(self.path, check_same_thread=False, timeout=2)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA auto_vacuum=INCREMENTAL")
@@ -225,6 +226,7 @@ class Store:
         return {"items": items, "total": total, "limit": limit, "offset": offset,
                 "period": {"from": start, "to": end},
                 "quality": {"collection_enabled": self.policy.enabled, "registered_connections": n,
+                            "history_storage_available": self.persistence_available,
                             "collection_paused": bool(self.pause_reasons), "pause_reasons": sorted(self.pause_reasons),
                             "emergency_retention": json.loads(self.state("emergency_retention", "null")),
                             "domain_connections": known, "domain_coverage": known / n if n else None,

@@ -12,6 +12,12 @@
 | `remnawatch/__main__.py` | CLI, конфигурация, lifecycle коллектора/API/очистки |
 | `remnawatch/management.py` | Linux plans/actions, async job audit, idempotency, Docker/systemd/tc/sysctl |
 | `remnawatch/health.py` | Host telemetry, memory pressure guard, disk alerts и ранняя очистка |
+| `remnawatch/network.py` | Раздельные NIC rates с ошибками/reset metadata, интерфейсы/bridge/bond inventory |
+| `remnawatch/diagnostics.py` | Capabilities и безопасный in-memory source health, lag/gaps/permissions |
+| `remnawatch/live.py` | Opt-in inet_diag socket snapshots, stable cookie IDs, frozen pagination/change cursors |
+| `tests/test_diagnostics_live.py` | P0/P1 fixtures, real Linux TCP/UDP и fallback startup/API tests |
+| `tools/benchmark_live.py` | Воспроизводимый synthetic 50k microbenchmark, не VPN benchmark |
+| `LIVE_DIAGNOSTICS.md`, `TEST_REPORT_LIVE.md` | Контракт, compatibility matrix, migration/rollback и честные результаты проверок |
 | `tests/test_server.py` | Synthetic telemetry, API auth, management fake runners, disk/memory/rollback tests |
 | `deploy/` | Примеры systemd service и persistent OOM sysctl для оператора |
 | `SERVER_MANAGEMENT.md` | Управление, характеристики сервера и защита ресурсов |

@@ -278,7 +278,7 @@ class ServerTests(unittest.TestCase):
         (proc / "uptime").write_text("100.5 10.0")
         (proc / "net/dev").write_text("eth0: 100 0 0 0 0 0 0 0 200 0 0 0 0 0 0 0\n")
         ticks = iter([1, 3])
-        probe = HostProbe(proc, [self.root], clock=lambda: next(ticks))
+        probe = HostProbe(proc, [self.root], clock=lambda: next(ticks), sys=self.root / "sys")
         first = probe.snapshot()
         self.assertEqual(first["memory"]["used_percent"], 75)
         self.assertIsNone(first["cpu"]["usage_percent"])

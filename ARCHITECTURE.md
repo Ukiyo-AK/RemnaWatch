@@ -36,7 +36,7 @@ AccessParser принимает только accepted TCP/UDP записи с em
 
 ## Нагрузка и изоляция
 
-Сборщик читает не более batch_lines записей за poll; строки ограничены 8 KiB, память ограничена размером пакета. Oversized строки пропускаются bounded chunks. Нет синхронного вызова из Xray; медленная база увеличивает задержку мониторинга, а не блокирует подключение. SQLite cache 8 MiB, WAL, batch writes, индексы времени/user/domain, максимум 500 результатов и 100000 offset, SQL budget 2 секунды. REST-сервер последовательно обслуживает запросы; для внешнего доступа нужен reverse proxy с TLS, timeout, rate limits. Данные запросов не попадают в access log сервиса.
+Сборщик читает не более batch_lines записей за poll; строки ограничены 8 KiB, память ограничена размером пакета. Oversized строки пропускаются bounded chunks. Нет синхронного вызова из Xray; медленная база увеличивает задержку мониторинга, а не блокирует подключение. SQLite cache 8 MiB, WAL, batch writes, индексы времени/user/domain, максимум 500 результатов и 100000 offset, SQL budget 2 секунды. REST-сервер ограничен восемью concurrent handlers; для внешнего доступа нужен reverse proxy с TLS, timeout, rate limits. Данные запросов не попадают в access log сервиса.
 
 Опциональный NetworkSampler читает `/proc/net/dev` раз в 5 секунд для явно выбранных интерфейсов. Он сохраняет host/node bytes per second, не payload. Активность и peak/average load сопоставляются по UTC bucket и node. Это контекст нагрузки, без причинного вывода и без распределения байтов по доменам. Нельзя одновременно включать интерфейсы, дублирующие одни и те же пакеты (например bridge и его member).
 
@@ -47,3 +47,11 @@ AccessParser принимает только accepted TCP/UDP записи с em
 `health.py` получает bounded /proc metrics и disk usage. Guard каждые 10 секунд независимо от Xray приостанавливает ingestion при давлении памяти/диска. Emergency retention удаляет старую историю пакетами; external rotated logs удаляются только из allowlisted directories, без активных/symlink/hardlink файлов. Alert state остаётся в памяти даже при ошибках SQLite; информация доступна через /v1/server. Новые SQLite базы используют incremental vacuum, без автоматического full VACUUM существующих баз. Удаление не даёт абсолютной гарантии освобождения диска.
 
 Подробности API, deployment, sysctl/systemd limits, tc ownership и границы безопасности: [SERVER_MANAGEMENT.md](SERVER_MANAGEMENT.md). Управляющие действия могут прерывать подключения по явному запросу оператора; фоновые guard/monitoring их не перезапускают.
+
+## Диагностика и optional live source
+
+network.py отделяет per-NIC counter sampling от истории: monotonic deltas, reset/error metadata и read-only sysfs inventory, без double counting и без root. diagnostics.py ведёт in-memory source health независимо от SQLite. Storage alerts version=2 классифицируют missing/permissions/readonly/cleanup/I/O и сохраняют legacy представление. Отсутствующий каталог не создаётся.
+
+live.py опционально опрашивает Linux NETLINK_SOCK_DIAG (IPv4/IPv6 TCP/UDP) с socket cookies, без sniffing/payload/изменения forwarding. Transport socket не приписывается пользователю/домену. Immutable RAM records, ограниченные change ring и frozen snapshots обеспечивают cursor API; boot/epoch/gap invalidation требует resync. Сетевые ошибки и переполнение dump не публикуют ложный пустой успешный snapshot. Для unknown bytes/duration capabilities=false. Live history в SQLite не пишется.
+
+HTTP обработка ограничена восемью concurrent handlers и socket timeout; один slow header client не блокирует другой запрос. Error handler не печатает raw client/request exceptions. При unavailable SQLite на старте сохраняется host/live read-only API; mutations без durable audit выключены. UserMap immutable, CLI проверяет Remnawave UUID; cursor fingerprint исключает переназначение старого backlog после смены mapping. Подробнее: [LIVE_DIAGNOSTICS.md](LIVE_DIAGNOSTICS.md), [TEST_REPORT_LIVE.md](TEST_REPORT_LIVE.md).

@@ -27,3 +27,13 @@ Backend панели может использовать GET /v1/server для �
 Управление — opt-in config и host root; default monitoring-only остаётся возможным без root. Windows mutations не поддерживаются. Подключение и deployment описаны в [SERVER_MANAGEMENT.md](SERVER_MANAGEMENT.md). Административный Bearer token нельзя выдавать конечным пользователям; API панели должен отдельно проверять права администрирования сервера. Source API здесь не имеет per-user role, поэтому фильтр user_id не ограничивает права токена.
 
 Ранняя очистка истории при full disk отражается в domain quality.emergency_retention. Пауза по памяти/диску отображается как collection_paused/pause_reasons и не означает deliberate disabled/purge. Для удаления внешних rotated logs задайте только операторские log_directories; активные logs должны обслуживаться logrotate. Защита памяти не является гарантией отсутствия reboot или OOM termination.
+
+## Capabilities, диагностика и live API (Panel 2.7.4 / ALTLINK)
+
+Сначала запросите `/v1/capabilities`: на старом агенте 404 должен выключать только новый UI, а не host monitoring. Не объявляйте unsupported поле нулём. Разделяйте supported/configured/healthy, source unavailable и пустой успешный snapshot. Storage v2 критичность учитывает required и включённость источника; старый log_storage_unavailable доступен через legacy_code/legacy_alerts.
+
+Live source выключен по умолчанию. linux_inet_diag — namespace transport sockets без Xray user/domain correlation. Не подписывайте этот экран «все пользовательские подключения», не превращайте socket в logical stream и не распределяйте user counters. user/inbound filters могут честно давать пустой результат. Tenant/user permissions всегда проверяет backend; фильтр не авторизация. При отображении NIC/bridge выбирайте явное правило, сами rates уже раздельные.
+
+Для replica: полностью прочитайте `/v1/connections/live` с одним snapshot_id, затем используйте его next_cursor в `/v1/connections/changes`. Идемпотентный upsert по connection_id/sequence, tombstones и state-exit transitions обязательны. HTTP 409 требует полного resync, не пропуска событий. Detalи и retention RAM см. [LIVE_DIAGNOSTICS.md](LIVE_DIAGNOSTICS.md). Для точной UUID attribution нужен отдельный доказуемый application exporter; текущий адаптер ничего не угадывает.
+
+CLI strict_user_uuid=true требует Remnawave UUID. При смене mapping непрочитанный backlog старого cursor не приписывается новому пользователю; потеря явно отражается в diagnostic gap. Для controlled import сперва обработайте старый backlog с прежним mapping. Новый сборщик не требует обновления панели/Xray; реальный end-to-end ALTLINK тест и runtime старого image пока не заявлены.

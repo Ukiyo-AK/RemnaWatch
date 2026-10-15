@@ -8,6 +8,39 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from .events import domain_name
 from .management import Unsupported, Conflict
 from .auth import NodeAuth
+from .live import ResyncRequired
+from .diagnostics import Sources
+import threading
+from socketserver import ThreadingMixIn
+
+
+class BoundedHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+    block_on_close = False
+    request_queue_size = 16
+
+    def __init__(self, *args):
+        self.slots = threading.BoundedSemaphore(8)
+        super().__init__(*args)
+
+    def process_request(self, request, address):
+        if not self.slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, address)
+        except Exception:
+            self.slots.release()
+            raise
+
+    def process_request_thread(self, request, address):
+        try:
+            super().process_request_thread(request, address)
+        finally:
+            self.slots.release()
+
+    def handle_error(self, request, client_address):
+        pass  # Never print client addresses, request paths or raw exceptions.
 
 
 def timestamp(value):
@@ -54,8 +87,9 @@ def dispatch(store, path, query):
     return store.query(mode=mode, **kwargs)
 
 
-def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=None):
+def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=None, diagnostics=None, live=None):
     auth = token if isinstance(token, NodeAuth) else NodeAuth(token)
+    diagnostics = diagnostics or Sources(health=health, live=live)
 
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
@@ -97,6 +131,22 @@ def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=
                     if query:
                         raise ValueError("node verification takes no parameters")
                     result = auth.public_info()
+                elif url.path == "/v1/capabilities":
+                    if query:
+                        raise ValueError("capabilities takes no parameters")
+                    result = diagnostics.capabilities()
+                elif url.path == "/v1/diagnostics/sources":
+                    if query:
+                        raise ValueError("source diagnostics takes no parameters")
+                    result = diagnostics.report()
+                elif url.path == "/v1/network/interfaces" and health:
+                    if query:
+                        raise ValueError("interface inventory takes no parameters")
+                    result = {"items": health.probe.snapshot().get("interfaces", []), "aggregation": "none"}
+                elif url.path in ("/v1/connections/live", "/v1/connections/changes") and live:
+                    result = live.query(url.path.rsplit("/", 1)[1], query)
+                elif url.path.startswith("/v1/connections/") and live:
+                    result = live.query("detail", query, url.path.removeprefix("/v1/connections/"))
                 elif url.path == "/v1/server" and manager and health:
                     if query:
                         raise ValueError("server snapshot takes no parameters")
@@ -112,6 +162,9 @@ def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=
                 else:
                     result = dispatch(store, url.path, query)
                 self.send_json(200, result)
+            except ResyncRequired:
+                self.send_json(409, {"error": "cursor_or_snapshot_expired", "resync_required": True,
+                                     "remediation": "Fetch GET /v1/connections/live without cursor or snapshot_id"})
             except LookupError:
                 self.send_json(404, {"error": "not found"})
             except (ValueError, UnicodeError, OverflowError):
@@ -158,4 +211,4 @@ def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=
             except sqlite3.OperationalError:
                 self.send_json(503, {"error": "storage busy or unavailable"})
 
-    return HTTPServer(address, Handler)
+    return BoundedHTTPServer(address, Handler)

@@ -2,9 +2,22 @@
   "host": "127.0.0.1",
   "port": 8080,
   "auth": {"token": ""},
+  "network_origin": "unknown",
+  "live_connections": {
+    "enabled": false,
+    "adapter": "linux_inet_diag",
+    "protocols": ["tcp", "udp"],
+    "fields": ["local_ip", "local_port", "peer_ip", "peer_port"],
+    "poll_seconds": 5,
+    "max_connections": 10000,
+    "max_changes": 10000,
+    "snapshot_ttl_seconds": 30,
+    "tombstone_seconds": 60
+  },
   "database": "domains.sqlite",
+  "strict_user_uuid": true,
   "domains": {"enabled": true, "event_days": 7, "aggregate_days": 30, "purge_on_disable": true},
-  "users": [{"node_id": "node-1", "inbound": "vless", "email": "xray-user-email", "user_id": "remnawave-user-uuid"}],
+  "users": [{"node_id": "node-1", "inbound": "vless", "email": "xray-user-email", "user_id": "59cf9ada-b568-4513-8582-923576b05ef3"}],
   "access_logs": [{"node_id": "node-1", "path": "/var/log/xray/access.log", "utc_offset_minutes": 0, "client_request_verified": false, "start_at_end": true, "batch_lines": 1000, "poll_seconds": 1}],
   "network": [],
   "management": {

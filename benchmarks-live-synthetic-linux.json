@@ -1,0 +1,15 @@
+{
+  "kind": "synthetic_only",
+  "connections": 50000,
+  "poll_wall_seconds": 2.5149736410094192,
+  "poll_cpu_seconds": 2.5116704530000002,
+  "snapshot_500_p95_seconds": 0.4443598509969888,
+  "snapshot_500_median_seconds": 0.3958266254994669,
+  "python_current_bytes": 166899684,
+  "python_peak_bytes": 190400878,
+  "disk_io_bytes": null,
+  "disk_io_measured": false,
+  "kernel_poll_measured": false,
+  "vpn_impact_measured": false,
+  "limitations": "tracemalloc overhead included; in-process query plus JSON, not HTTP/network p95 or process RSS"
+}

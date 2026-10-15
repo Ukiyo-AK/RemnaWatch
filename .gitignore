@@ -4,3 +4,4 @@ __pycache__/
 .venv/
 *.sqlite*
 config.json
+.test-ssh-*
