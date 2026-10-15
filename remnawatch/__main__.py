@@ -1,6 +1,5 @@
 import argparse
 import json
-import os
 import threading
 import sqlite3
 from .api import make_server
@@ -9,6 +8,7 @@ from .events import AccessParser, UserMap
 from .store import Policy, Store
 from .management import Manager
 from .health import PressureGuard
+from .auth import resolve_auth
 
 
 def main():
@@ -17,12 +17,13 @@ def main():
     args = parser.parse_args()
     with open(args.config, encoding="utf-8") as source:
         config = json.load(source)
+    # Fail invalid/missing credentials before opening or purging any stored history.
+    auth = resolve_auth(config)
     store = Store(config.get("database", "domains.sqlite"), Policy(**config.get("domains", {})))
     users = UserMap(config.get("users", []))
-    token = os.environ.get("REMNAWATCH_API_TOKEN", "")
     manager = Manager(store, config.get("management", {}))
     health = PressureGuard(store, config.get("protection", {}), [log["path"] for log in config.get("access_logs", [])])
-    server = make_server(store, token, (config.get("host", "127.0.0.1"), config.get("port", 8080)), manager, health)
+    server = make_server(store, auth, (config.get("host", "127.0.0.1"), config.get("port", 8080)), manager, health)
     stop = threading.Event()
     workers = []
     health.check()

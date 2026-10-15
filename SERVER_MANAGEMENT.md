@@ -4,7 +4,7 @@
 
 ## API и запуск
 
-Все endpoints используют общий `REMNAWATCH_API_TOKEN`. Это административный секрет: после включения управления его владелец может перезагрузить сервер. Доступ только backend панели/оператору, через localhost или TLS reverse proxy с RBAC. Не отдавайте токен браузеру конечного пользователя. JSON-конфиг, Python код, Compose файлы/.env и hooks должны контролироваться оператором и не быть доступны на запись непривилегированным пользователям.
+Все endpoints используют один токен конкретной ноды из auth.token (fallback для старых установок — REMNAWATCH_API_TOKEN). Основной сервер выдаёт отдельный credential каждой ноде; процедура описана в [NODE_ENROLLMENT.md](NODE_ENROLLMENT.md). Это административный секрет: после включения управления его владелец может перезагрузить сервер. Доступ только backend панели/оператору, через localhost или TLS reverse proxy с RBAC. Не отдавайте токен браузеру конечного пользователя. JSON-конфиг, Python код, Compose файлы/.env и hooks должны контролироваться оператором и не быть доступны на запись непривилегированным пользователям.
 
 - `GET /v1/server` — hostname, OS release (текущее ядро ОС), architecture, CPU model/count/usage, RAM/swap, uptime/load average, disk capacity/free space/free inodes, NIC TX/RX counters/rates; protection alerts и capabilities управления.
 - `GET /v1/server/jobs?limit=100&offset=0` — журнал задач (до 500 записей на страницу).

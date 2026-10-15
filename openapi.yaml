@@ -10,6 +10,29 @@ servers:
 security:
   - BearerAuth: []
 paths:
+  /v1/node:
+    get:
+      operationId: verifyNodeConnection
+      summary: Verify expected node identity using its provisioned Bearer credential
+      description: No query parameters. Does not reveal the secret or automatically register the node with a panel.
+      responses:
+        '200':
+          description: Authenticated node identity; panel must compare expected node_id, service and api_version
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [node_id, authentication, service, api_version]
+                properties:
+                  node_id: {type: [string, 'null'], description: Canonical UUID for new tokens; null in legacy mode}
+                  authentication: {type: string, enum: [node_token_v1, legacy_bearer]}
+                  service: {type: string, const: remnawatch}
+                  api_version: {type: string, const: v1}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
   /v1/domains:
     get:
       operationId: listDomains
@@ -264,7 +287,11 @@ components:
     BearerAuth:
       type: http
       scheme: bearer
-      description: Shared service token, not a per-user token; panel backend enforces tenant access
+      description: >-
+        Unique per-node credential rw_node_v1.UUID.Base64URL-secret issued by the main server,
+        manually pasted into auth.token; same credential protects all endpoints of that node.
+        Config credential overrides legacy REMNAWATCH_API_TOKEN. Not a per-user token;
+        panel backend enforces tenant/admin access. TLS or a protected channel is required.
   parameters:
     From:
       name: from

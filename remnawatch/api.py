@@ -1,13 +1,13 @@
 """One shared authorization mechanism for every HTTP endpoint."""
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import hmac
 import json
 import re
 import sqlite3
 from urllib.parse import parse_qs, unquote, urlsplit
 from .events import domain_name
 from .management import Unsupported, Conflict
+from .auth import NodeAuth
 
 
 def timestamp(value):
@@ -55,8 +55,7 @@ def dispatch(store, path, query):
 
 
 def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=None):
-    if not isinstance(token, str) or len(token) < 32 or not token.isascii() or any(c.isspace() for c in token):
-        raise ValueError("API token must contain at least 32 ASCII non-whitespace characters")
+    auth = token if isinstance(token, NodeAuth) else NodeAuth(token)
 
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
@@ -80,7 +79,7 @@ def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=
 
         def authorized(self):
             headers = self.headers.get_all("Authorization", [])
-            if len(headers) != 1 or not hmac.compare_digest(headers[0].encode(), ("Bearer " + token).encode()):
+            if not auth.accepts(headers):
                 self.send_json(401, {"error": "unauthorized"})
                 return False
             return True
@@ -94,7 +93,11 @@ def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=
             try:
                 url = urlsplit(self.path)
                 query = parse_qs(url.query, keep_blank_values=True, max_num_fields=16)
-                if url.path == "/v1/server" and manager and health:
+                if url.path == "/v1/node":
+                    if query:
+                        raise ValueError("node verification takes no parameters")
+                    result = auth.public_info()
+                elif url.path == "/v1/server" and manager and health:
                     if query:
                         raise ValueError("server snapshot takes no parameters")
                     result = {"server": health.probe.snapshot(), "protection": health.status(), "management": manager.capabilities()}

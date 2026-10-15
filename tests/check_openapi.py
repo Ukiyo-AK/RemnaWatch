@@ -6,7 +6,7 @@ import yaml
 def check():
     spec = yaml.safe_load(Path("openapi.yaml").read_text(encoding="utf-8"))
     assert spec["openapi"] == "3.1.0"
-    assert len(spec["paths"]) == 10
+    assert len(spec["paths"]) == 11
     def visit(value):
         if isinstance(value, dict):
             if "$ref" in value:
@@ -26,7 +26,7 @@ def check():
         parameters = [spec["components"]["parameters"][p["$ref"].split("/")[-1]] if "$ref" in p else p
                       for p in operation.get("parameters", [])]
         names = {p["name"] for p in parameters}
-        if not path.startswith("/v1/server"):
+        if not path.startswith("/v1/server") and path != "/v1/node":
             assert {"from", "to", "period", "limit", "offset"} <= names
             assert {"200", "400", "401", "503"} <= set(operation["responses"])
         else:
@@ -37,7 +37,7 @@ def check():
         for p in parameters:
             if p["in"] == "path":
                 assert "{" + p["name"] + "}" in path and p["required"] is True
-    print("OpenAPI YAML, local references and all ten operation contracts: OK")
+    print("OpenAPI YAML, local references and all eleven operation contracts: OK")
 
 
 if __name__ == "__main__":

@@ -5,7 +5,10 @@
 | `remnawatch/events.py` | Event, домены/IDNA/IP, access.log parser, UserMap, trusted metadata contract |
 | `remnawatch/store.py` | SQLite WAL, retention, dedup, атомарные rollups, история и аналитика |
 | `remnawatch/collector.py` | Bounded polling, cursor, rotation, optional Linux interface load |
-| `remnawatch/api.py` | Общая Bearer-авторизация, шесть REST routes, фильтры и ошибки |
+| `remnawatch/api.py` | Общая Bearer-авторизация ноды, domain/server routes, проверка подключения, фильтры и ошибки |
+| `remnawatch/auth.py` | Генератор per-node credentials для основного сервера, config/env resolution и проверка Bearer |
+| `tests/test_auth.py` | Генерация/ротация, изоляция нод, config precedence и HTTP pairing/auth |
+| `NODE_ENROLLMENT.md` | Ручное добавление ноды, backend Python/Node.js generation, connection check и отзыв |
 | `remnawatch/__main__.py` | CLI, конфигурация, lifecycle коллектора/API/очистки |
 | `remnawatch/management.py` | Linux plans/actions, async job audit, idempotency, Docker/systemd/tc/sysctl |
 | `remnawatch/health.py` | Host telemetry, memory pressure guard, disk alerts и ранняя очистка |

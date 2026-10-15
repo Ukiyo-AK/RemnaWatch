@@ -1,6 +1,8 @@
 # Domain Activity REST API
 
-Все routes требуют `Authorization: Bearer <REMNAWATCH_API_TOKEN>`. Токен — не менее 32 ASCII символов без пробелов; одинаковая авторизация для всей поверхности API. Возврат `Cache-Control: no-store`. По умолчанию localhost:8080; удалённое подключение через защищённый reverse proxy.
+Все routes требуют `Authorization: Bearer <полный токен ноды>`. Основной сервер генерирует credential формата `rw_node_v1.<UUID>.<256-bit secret Base64URL>` и оператор вставляет его в auth.token. Один механизм авторизации защищает всю поверхность API данной ноды. Непустой auth.token имеет приоритет над legacy REMNAWATCH_API_TOKEN (32..512 printable ASCII без пробелов). Возврат `Cache-Control: no-store`. По умолчанию localhost:8080; удалённое подключение через защищённый канал. Генерация/ротация: [NODE_ENROLLMENT.md](NODE_ENROLLMENT.md).
+
+`GET /v1/node` без query параметров возвращает `{node_id, authentication, service, api_version}`. При новом токене authentication=node_token_v1, node_id — UUID из сконфигурированного credential, service=remnawatch, api_version=v1. Для legacy Bearer authentication=legacy_bearer и node_id=null. Endpoint требует авторизацию, токен не возвращает; 400 при query, 401 при неверном/повторном/отсутствующем Authorization. Основной сервер обязан сравнить ожидаемый UUID и service/version, прежде чем отмечать ноду подключённой.
 
 | Endpoint | Результат |
 |---|---|
