@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: RemnaWatch Domain Activity API
-  version: 0.1.0
+  version: 0.2.0
   description: >-
     Sensitive connection metadata. Registered events do not prove page visits.
     UTC whole-second half-open intervals. Quality never guarantees complete coverage.
@@ -10,6 +10,69 @@ servers:
 security:
   - BearerAuth: []
 paths:
+  /v1/users/{id}/metrics:
+    get:
+      operationId: userMeasuredRates
+      summary: Existing opt-in Xray StatsService totals, all parallel user connections
+      parameters:
+        - $ref: '#/components/parameters/UserPath'
+      responses:
+        '200':
+          description: Missing, first, reset, changed counter set, stale and gapped samples have available=false and null rates
+          content:
+            application/json:
+              schema: {type: object}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /v1/users/{id}/rate-limit:
+    get:
+      operationId: userRateLimitState
+      summary: Exact UUID shaping is unsupported by the current backend
+      parameters:
+        - $ref: '#/components/parameters/UserPath'
+      responses:
+        '501':
+          description: supported=false, state=unsupported, applied=false; no node-wide fallback
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      operationId: userRateLimitRequest
+      summary: Refuse unsupported apply or revoke without changing VPN traffic
+      parameters:
+        - $ref: '#/components/parameters/UserPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: {type: string, enum: [apply, revoke]}
+                mbps: {type: number, exclusiveMinimum: 0}
+                expires_at: {type: integer}
+                reason: {type: string}
+                request_id: {type: string}
+      responses:
+        '501':
+          description: No verified UUID shaping backend; request is never reported as applied
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /v1/alerts/sustained-load:
+    get:
+      operationId: sustainedLoadEpisodes
+      summary: Bounded episode warnings without automatic sanctions or external messages
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Latest 500 in-memory episode events; one event per continuous exceedance
+          content:
+            application/json:
+              schema: {type: object}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
   /v1/capabilities:
     get:
       operationId: telemetryCapabilities
@@ -145,12 +208,19 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [node_id, authentication, service, api_version]
+                required: [node_id, authentication, service, api_version, agent_version, platform, architecture, started_at, remnanode_version, xray_version]
                 properties:
                   node_id: {type: [string, 'null'], description: Canonical UUID for new tokens; null in legacy mode}
                   authentication: {type: string, enum: [node_token_v1, legacy_bearer]}
                   service: {type: string, const: remnawatch}
                   api_version: {type: string, const: v1}
+                  agent_version: {type: string, description: Agent SemVer independent of Node and Xray}
+                  agent_build: {type: [string, 'null']}
+                  platform: {type: string}
+                  architecture: {type: string}
+                  started_at: {type: string, format: date-time}
+                  remnanode_version: {type: [string, 'null'], description: Verified runtime release or null, never image tag latest}
+                  xray_version: {type: [string, 'null']}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
   /v1/domains:

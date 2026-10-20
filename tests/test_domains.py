@@ -71,7 +71,7 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(correlated_metadata(data, UserMap(USERS)).source, "tls_sni")
         for changes in ({"correlation_verified": False}, {"email": "missing"}, {"cookies": "secret"}):
             with self.assertRaises(ValueError):
-                correlated_metadata(data | changes, UserMap(USERS))
+                correlated_metadata({**data, **changes}, UserMap(USERS))
 
 
 class StorageTests(unittest.TestCase):
@@ -84,7 +84,7 @@ class StorageTests(unittest.TestCase):
         self.temp.cleanup()
 
     def query(self, **kwargs):
-        return self.store.query(**({"start": NOW - 3600, "end": NOW} | kwargs))
+        return self.store.query(**{"start": NOW - 3600, "end": NOW, **kwargs})
 
     def test_history_filter_pagination_and_top(self):
         self.store.ingest([event(1), event(2), event(3, user_id="u2", domain="other.com"),

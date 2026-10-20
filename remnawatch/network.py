@@ -12,6 +12,7 @@ class NetworkProbe:
         self.origin = origin
         self.previous, self.known = None, set()
         self.healthy, self.error_code, self.sampled_at = None, "not_sampled", None
+        self.last_success_at, self.errors = None, 0
 
     def read(self, path, limit=262144):
         with path.open(encoding="ascii") as source:
@@ -130,4 +131,8 @@ class NetworkProbe:
         if not error:
             self.known = set(current)
         self.healthy, self.error_code, self.sampled_at = error is None, error, sampled
+        if error:
+            self.errors += 1
+        else:
+            self.last_success_at = sampled
         return rows, inventory

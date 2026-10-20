@@ -1,4 +1,5 @@
 """Strict metadata-only inputs. Never retain the original log line or payload."""
+from __future__ import annotations
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone, timedelta
 import ipaddress
@@ -12,7 +13,7 @@ from types import MappingProxyType
 def domain_name(value):
     if not isinstance(value, str) or not value or len(value) > 253:
         raise ValueError("invalid domain")
-    value = value.removesuffix(".").encode("idna").decode("ascii").lower()
+    value = (value[:-1] if value.endswith(".") else value).encode("idna").decode("ascii").lower()
     try:
         ipaddress.ip_address(value)
     except ValueError:
@@ -126,10 +127,12 @@ class AccessParser:
         self.node_id, self.users = node_id, users
         self.tz = timezone(timedelta(minutes=utc_offset_minutes))
         self.client_request_verified = client_request_verified
+        self.last_error = None
         mapping = sorted([*key, value] for key, value in users.entries.items() if key[0] == node_id)
         self.mapping_fingerprint = hashlib.sha256(json.dumps(mapping, separators=(",", ":")).encode()).hexdigest()
 
     def parse(self, line, event_id):
+        self.last_error = "invalid_line"
         if len(line) > 8192:
             return None
         m = ACCESS.fullmatch(line.strip())
@@ -140,14 +143,17 @@ class AccessParser:
             inbound, outbound = detour if len(detour) == 2 else ("", detour[0])
             user_id = self.users.resolve(self.node_id, inbound, m["email"])
             if not user_id:
+                self.last_error = "user_mapping_mismatch"
                 return None
             domain, target_ip, port = endpoint(m["target"])
             _, client_ip, _ = endpoint(m["client"])
             stamp = int(datetime.strptime(m["date"], "%Y/%m/%d %H:%M:%S").replace(tzinfo=self.tz).timestamp())
             source = "client_request" if domain and self.client_request_verified else "xray_access" if domain else "ip_only"
-            return Event(event_id, self.node_id, user_id, stamp, domain, target_ip, client_ip,
+            event = Event(event_id, self.node_id, user_id, stamp, domain, target_ip, client_ip,
                          m["network"], port, inbound, outbound, source,
                          "observed" if source == "client_request" else "unknown")
+            self.last_error = None
+            return event
         except (ValueError, OverflowError, UnicodeError):
             return None
 

@@ -10,7 +10,11 @@ from .management import Unsupported, Conflict
 from .auth import NodeAuth
 from .live import ResyncRequired
 from .diagnostics import Sources
+from .user_metrics import limit_status
+from .tls import TLSListener
 import threading
+import socket
+import os
 from socketserver import ThreadingMixIn
 
 
@@ -32,6 +36,14 @@ class BoundedHTTPServer(ThreadingMixIn, HTTPServer):
         except Exception:
             self.slots.release()
             raise
+
+    def server_bind(self):
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            # Windows SO_REUSEADDR otherwise permits a second listener to steal
+            # an occupied port. Linux already rejects concurrent TCP listeners.
+            self.allow_reuse_address = False
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
     def process_request_thread(self, request, address):
         try:
@@ -87,7 +99,7 @@ def dispatch(store, path, query):
     return store.query(mode=mode, **kwargs)
 
 
-def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=None, diagnostics=None, live=None):
+def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=None, diagnostics=None, live=None, user_metrics=None, tls_context=None):
     auth = token if isinstance(token, NodeAuth) else NodeAuth(token)
     diagnostics = diagnostics or Sources(health=health, live=live)
 
@@ -131,6 +143,7 @@ def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=
                     if query:
                         raise ValueError("node verification takes no parameters")
                     result = auth.public_info()
+                    result.update(getattr(diagnostics, "runtime_versions", {}))
                 elif url.path == "/v1/capabilities":
                     if query:
                         raise ValueError("capabilities takes no parameters")
@@ -139,6 +152,19 @@ def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=
                     if query:
                         raise ValueError("source diagnostics takes no parameters")
                     result = diagnostics.report()
+                elif m := re.fullmatch(r"/v1/users/([^/]+)/rate-limit", url.path):
+                    if query:
+                        raise ValueError("rate limit takes no query")
+                    self.send_json(501, limit_status(m[1]))
+                    return
+                elif (m := re.fullmatch(r"/v1/users/([^/]+)/metrics", url.path)) and user_metrics:
+                    if query:
+                        raise ValueError("user metrics takes no query")
+                    result = user_metrics.get(m[1])
+                elif url.path == "/v1/alerts/sustained-load" and user_metrics:
+                    if set(query) - {"limit", "offset"} or any(len(v) != 1 for v in query.values()):
+                        raise ValueError("invalid pagination")
+                    result = user_metrics.events(int(query.get("limit", [100])[0]), int(query.get("offset", [0])[0]))
                 elif url.path == "/v1/network/interfaces" and health:
                     if query:
                         raise ValueError("interface inventory takes no parameters")
@@ -146,7 +172,7 @@ def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=
                 elif url.path in ("/v1/connections/live", "/v1/connections/changes") and live:
                     result = live.query(url.path.rsplit("/", 1)[1], query)
                 elif url.path.startswith("/v1/connections/") and live:
-                    result = live.query("detail", query, url.path.removeprefix("/v1/connections/"))
+                    result = live.query("detail", query, url.path[len("/v1/connections/"):])
                 elif url.path == "/v1/server" and manager and health:
                     if query:
                         raise ValueError("server snapshot takes no parameters")
@@ -158,7 +184,7 @@ def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=
                 elif url.path.startswith("/v1/server/jobs/") and manager:
                     if query:
                         raise ValueError("job detail takes no parameters")
-                    result = manager.jobs(url.path.removeprefix("/v1/server/jobs/"))
+                    result = manager.jobs(url.path[len("/v1/server/jobs/"):])
                 else:
                     result = dispatch(store, url.path, query)
                 self.send_json(200, result)
@@ -175,7 +201,8 @@ def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=
         def do_POST(self):
             if not self.authorized():
                 return
-            if self.path != "/v1/server/actions" or manager is None:
+            limit_match = re.fullmatch(r"/v1/users/([^/]+)/rate-limit", self.path)
+            if not limit_match and (self.path != "/v1/server/actions" or manager is None):
                 self.send_json(404, {"error": "not found"})
                 return
             try:
@@ -198,6 +225,11 @@ def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=
                         result[key] = value
                     return result
                 body = json.loads(raw, object_pairs_hook=unique_pairs)
+                if limit_match:
+                    if not isinstance(body, dict) or body.get("action") not in ("apply", "revoke"):
+                        raise ValueError("invalid limit action")
+                    self.send_json(501, limit_status(limit_match[1]))
+                    return
                 result = manager.submit(body)
                 self.send_json(200 if result.get("dry_run") else 202, result)
             except Unsupported as exc:
@@ -211,4 +243,10 @@ def make_server(store, token, address=("127.0.0.1", 8080), manager=None, health=
             except sqlite3.OperationalError:
                 self.send_json(503, {"error": "storage busy or unavailable"})
 
-    return BoundedHTTPServer(address, Handler)
+    class NetworkServer(BoundedHTTPServer):
+        address_family = socket.AF_INET6 if ":" in address[0] else socket.AF_INET
+    class SecureServer(TLSListener, NetworkServer):
+        pass
+    server = (SecureServer if tls_context else NetworkServer)(address, Handler)
+    server.tls_context = tls_context
+    return server

@@ -29,3 +29,18 @@
 | `LIMITATIONS.md` | Границы полноты и достоверности |
 
 Запуск: `python -m remnawatch --config config.json`. Проверка: `python -m unittest discover -s tests -v`. Runtime использует только стандартную библиотеку Python.
+## Добавления 0.2.0
+
+| Файл | Назначение |
+|---|---|
+| `remnawatch/version.py`, `runtime.py` | Версия агента, безопасная read-only идентификация реальных Node/Xray |
+| `remnawatch/preflight.py`, `install.py` | Матрица, logger/mount discovery, независимые этапы, venv, health/rollback |
+| `remnawatch/dependencies.py`, `deploy/install.sh` | Python-free bootstrap, установка только недостающих APT dependencies, opt-out и безопасные конфликты |
+| `tests/test_dependencies.py` | Отсутствующие пакеты, идемпотентность, конфликты resolver, права, ошибки и shell preflight |
+| `remnawatch/update.py`, `releases.py` | HTTPS/digest/path validation, manifest, SemVer и panel policy helpers |
+| `remnawatch/tls.py`, `probe.py` | TLS вне accept loop; отдельный browser RTT endpoint |
+| `remnawatch/user_metrics.py` | Opt-in user totals, непрерывная нагрузка, честный unsupported UUID shaping |
+| `remnawatch/transport.py` | Redacted central history HTTP/DNS/TLS/connect/timeout диагностика |
+| `tests/test_deployment.py` | Матрица fixtures, provenance, SemVer, supply chain, rollback, TLS IPv4/IPv6, gaps/load |
+| `INSTALLATION.md`, `COMPATIBILITY.md`, `TEST_REPORT_INSTALLATION.md` | Установка, целевая матрица и реально выполненная проверка |
+| `deploy/probe.example.json`, `deploy/xray-log-plan.example.json` | Probe config и review-only план логирования без исполнения |

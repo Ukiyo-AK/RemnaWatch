@@ -1,8 +1,8 @@
 # RemnaWatch
 
-Пассивный Domain Activity Monitoring для Xray/Remnawave Node: история пользователей, топ доменов, временная аналитика и REST API. Python 3.11+, без runtime-зависимостей.
+Пассивный Domain Activity Monitoring для Xray/Remnawave Node: история пользователей, топ доменов, временная аналитика и REST API. Python 3.8+, без сторонних Python runtime-зависимостей. Запуск установщика: `sudo sh deploy/install.sh --install-deps` для подготовки системы; `--apply` автоматически устанавливает недостающие зависимости. Поддерживаемые версии Debian/Ubuntu перечислены в [COMPATIBILITY.md](COMPATIBILITY.md).
 
-Скопируйте `config.example.json` в `config.json`, задайте node/inbound/Xray-email → Remnawave ID и путь существующего access.log. На основном сервере выполните `python3 -m remnawatch.auth issue-token`, вставьте выданный token в `auth.token` конфига ноды и запустите:
+Установка, доверенный digest, изолированный venv, обновление с откатом, история и HTTPS probe: [INSTALLATION.md](INSTALLATION.md). Матрица: [COMPATIBILITY.md](COMPATIBILITY.md), результаты: [TEST_REPORT_INSTALLATION.md](TEST_REPORT_INSTALLATION.md). История в новом примере выключена; её включают после проверки реального лога и UUID mapping. Для разработки скопируйте `config.example.json` в `config.json`, задайте локальный путь БД и auth. На основном сервере выполните `python3 -m remnawatch.auth issue-token`, вставьте выданный token в `auth.token` конфига ноды и запустите:
 
 ```sh
 python -m remnawatch --config config.json

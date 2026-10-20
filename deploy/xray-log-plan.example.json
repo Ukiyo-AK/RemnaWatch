@@ -1,0 +1,21 @@
+{
+  "description": "Review-only change to the node-specific Remnawave profile; not applied by RemnaWatch",
+  "preconditions": [
+    "Back up the node-specific panel profile and confirm rollback",
+    "Confirm explicit operator consent to apply the logging change",
+    "Do not modify shared profiles, routing, inbounds, sniffing or node image",
+    "Provision exact Remnawave UUID mapping independently of Xray VLESS IDs"
+  ],
+  "log_fields_to_merge": {
+    "access": "",
+    "error": "",
+    "loglevel": "warning",
+    "dnsLog": false
+  },
+  "verification": [
+    "s6: actual mounted /var/log/xray/current; Supervisor: actual mounted /var/log/supervisor/xray.out.log",
+    "Confirm agent read permission and real file growth after VPN connection",
+    "Confirm diagnostics last_event_at and correct UUID history via authenticated API",
+    "Check existing VPN connections and panel synchronization"
+  ]
+}

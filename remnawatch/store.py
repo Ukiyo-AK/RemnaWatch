@@ -99,7 +99,8 @@ class Store:
                 if e.timestamp >= now - self.policy.event_days * 86400:
                     db.execute("INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", tuple(e.to_dict().values()))
                 db.execute("""INSERT INTO aggregates VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                    ON CONFLICT DO UPDATE SET connections=connections+1,
+                    ON CONFLICT(timestamp,node_id,user_id,domain,destination_ip,protocol,destination_port,inbound,outbound,source,confidence)
+                    DO UPDATE SET connections=connections+1,
                     first_seen=min(first_seen,excluded.first_seen),last_seen=max(last_seen,excluded.last_seen),
                     measured_connections=measured_connections+excluded.measured_connections,
                     measured_bytes=measured_bytes+excluded.measured_bytes""",

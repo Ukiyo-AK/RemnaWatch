@@ -3,6 +3,7 @@
 Opaque shared secrets, not JWTs: a node accepts only its configured credential.
 No network enrollment, arbitrary token trust, or automatic secret generation at startup.
 """
+from __future__ import annotations
 from dataclasses import dataclass, field
 import argparse
 import hmac
@@ -11,6 +12,7 @@ import os
 import re
 import secrets
 import uuid
+from .runtime import identity
 
 
 PREFIX = "rw_node_v1."
@@ -77,7 +79,7 @@ class NodeAuth:
     def public_info(self):
         return {"node_id": self.node_id,
                 "authentication": "node_token_v1" if self.node_id else "legacy_bearer",
-                "service": "remnawatch", "api_version": "v1"}
+                "service": "remnawatch", "api_version": "v1", **identity()}
 
 
 def resolve_auth(config, environ=None):

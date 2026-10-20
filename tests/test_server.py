@@ -83,7 +83,7 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.manager.plan("xray_update")["scope"], "node_including_xray")
 
     def test_standalone_core_restart_and_update_hook(self):
-        self.manager.settings = self.settings | {"xray_service": "xray.service"}
+        self.manager.settings = {**self.settings, "xray_service": "xray.service"}
         self.assertEqual(self.manager.plan("xray_restart")["commands"], [["/usr/bin/systemctl", "restart", "xray.service"]])
         with self.assertRaises(Unsupported):
             self.manager.plan("xray_update")
@@ -104,7 +104,7 @@ class ServerTests(unittest.TestCase):
         self.manager.submit(body)
         self.assertEqual(len(self.calls), 1)
         with self.assertRaises(Conflict):
-            self.manager.submit(body | {"action": "node_update"})
+            self.manager.submit({**body, "action": "node_update"})
         self.assertEqual(self.manager.jobs()["total"], 1)
 
     def test_restart_does_not_replay_pending_actions(self):
@@ -321,7 +321,7 @@ class ServerTests(unittest.TestCase):
                 with self.assertRaises(HTTPError) as caught:
                     urlopen(Request(base + "/v1/server/actions", data=raw, headers=auth))
                 self.assertEqual(caught.exception.code, 400)
-            self.manager.settings = self.settings | {"enabled": False}
+            self.manager.settings = {**self.settings, "enabled": False}
             with self.assertRaises(HTTPError) as caught:
                 urlopen(Request(base + "/v1/server/actions", data=b'{"action":"server_reboot","dry_run":false,"request_id":"reboot_001"}', headers=auth))
             self.assertEqual(caught.exception.code, 403)

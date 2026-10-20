@@ -2,6 +2,8 @@ import argparse
 import json
 import threading
 import sqlite3
+import signal
+import os
 from .api import make_server
 from .collector import Tailer, NetworkSampler, run_collector
 from .events import AccessParser, UserMap
@@ -11,12 +13,18 @@ from .health import PressureGuard
 from .auth import resolve_auth
 from .live import LiveConnections
 from .diagnostics import Sources
+from .runtime import discover_versions
+from .user_metrics import UserMetrics
+from .tls import context as tls_context
+from .transport import HistoryClient, HistoryTransportError
+from .probe import check_probe, validate as validate_probe
 
 
 def main():
     parser = argparse.ArgumentParser(description="Passive Xray domain activity monitoring")
     parser.add_argument("--config", required=True)
     args = parser.parse_args()
+    os.umask(0o077)
     with open(args.config, encoding="utf-8") as source:
         config = json.load(source)
     # Fail invalid/missing credentials before opening or purging any stored history.
@@ -43,15 +51,44 @@ def main():
         raise ValueError("invalid network_origin")
     live = LiveConnections.from_config(auth.node_id, config.get("live_connections", {}))
     diagnostics = Sources(config, health, live)
+    diagnostics.runtime_versions = discover_versions(config.get("runtime", {}).get("container"))
+    metrics_config = config.get("user_metrics", {})
+    user_metrics = UserMetrics(metrics_config.get("node_id", auth.node_id), users, metrics_config)
+    diagnostics.user_metrics = user_metrics
+    central_config = config.get("central_history", {})
+    central = HistoryClient(central_config["url"], auth.token, central_config.get("ca_file")) if central_config.get("enabled") else None
+    diagnostics.central_history = central
+    if config.get("probe_monitor", {}).get("enabled"):
+        validate_probe(config["probe_monitor"])
     if not store.persistence_available:
         for index in diagnostics.events:
             diagnostics.event_result(index, error="history_storage_unavailable")
     elif mapping_error:
         for index in diagnostics.events:
             diagnostics.event_result(index, error="invalid_user_mapping")
-    server = make_server(store, auth, (config.get("host", "127.0.0.1"), config.get("port", 8080)), manager, health, diagnostics, live)
+    tls = config.get("tls", {})
+    secure = tls_context(tls["certificate"], tls["private_key"]) if tls.get("enabled") else None
+    server = make_server(store, auth, (config.get("host", "127.0.0.1"), config.get("port", 8080)), manager, health, diagnostics, live, user_metrics, secure)
     stop = threading.Event()
     workers = []
+    def control_checks():
+        while not stop.is_set():
+            if central:
+                try:
+                    central.request("history-plan")
+                except HistoryTransportError:
+                    pass
+            if config.get("probe_monitor", {}).get("enabled"):
+                previous = getattr(diagnostics, "probe_state", {})
+                result = check_probe(config["probe_monitor"])
+                if not result["healthy"]:
+                    result["last_success_at"] = previous.get("last_success_at")
+                diagnostics.probe_state = result
+            stop.wait(60)
+    if central or config.get("probe_monitor", {}).get("enabled"):
+        workers.append(threading.Thread(target=control_checks, daemon=True))
+    if user_metrics.enabled:
+        workers.append(threading.Thread(target=user_metrics.run, args=(stop,), daemon=True))
     health.check()
     workers.append(threading.Thread(target=health.run, args=(stop,), daemon=True))
     if live.enabled:
@@ -89,6 +126,10 @@ def main():
     workers.append(threading.Thread(target=maintenance, daemon=True))
     for worker in workers:
         worker.start()
+    def terminate(*_):
+        stop.set()
+        threading.Thread(target=server.shutdown, daemon=True).start()
+    signal.signal(signal.SIGTERM, terminate)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -23,6 +23,12 @@ class Tailer:
         self.discarding = False
         self.gaps = 0
         self.last_gap_reason = None
+        self.last_event_at = None
+        self.skipped_events = 0
+        self.parse_errors = {"invalid_line": 0, "user_mapping_mismatch": 0}
+        self.poll_error = None
+        self.read_seconds = None
+        self.storage_seconds = None
 
     def close(self):
         if self.handle:
@@ -30,7 +36,16 @@ class Tailer:
             self.handle = None
 
     def _open(self):
-        handle = open(self.path, "rb")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+        handle = os.fdopen(os.open(self.path, flags), "rb")
+        try:
+            self._open_handle(handle)
+        except BaseException:
+            handle.close()
+            self.handle = None
+            raise
+
+    def _open_handle(self, handle):
         info = os.fstat(handle.fileno())
         if not stat.S_ISREG(info.st_mode):
             handle.close()
@@ -74,6 +89,8 @@ class Tailer:
         return accepted
 
     def poll(self):
+        started = time.monotonic()
+        self.poll_error = None
         if self.store.pause_reasons:
             return 0  # Preserve cursor/backlog; unlike deliberate disabling, do not skip.
         if not self.handle:
@@ -113,6 +130,8 @@ class Tailer:
                     # Persist skip mode across polls/restarts; a suffix is never a new event.
                     self.discarding = True
                     ignored += 1
+                    self.parse_errors["invalid_line"] += 1
+                    self.poll_error = "invalid_line"
                     self.position = self.handle.tell()
                     continue
                 self.handle.seek(offset)
@@ -123,7 +142,16 @@ class Tailer:
                 events.append(event)
             else:
                 ignored += 1
+                reason = self.parser.last_error or "invalid_line"
+                self.parse_errors[reason] += 1
+                self.poll_error = reason
+        self.read_seconds = time.monotonic() - started
+        saving = time.monotonic()
         result = self._checkpoint(events)
+        self.storage_seconds = time.monotonic() - saving
+        if events:
+            self.last_event_at = max(self.last_event_at or 0, max(event.timestamp for event in events))
+        self.skipped_events += ignored
         if ignored:
             self.store.count("unparsed_or_unmapped", ignored)
         current = os.stat(self.path)
@@ -139,11 +167,13 @@ def run_collector(tailer, stop, interval=1.0, diagnostics=None, source_index=Non
             tailer.poll()
             if diagnostics is not None:
                 lag = max(0, os.fstat(tailer.handle.fileno()).st_size - tailer.position) if tailer.handle else None
-                diagnostics.event_result(source_index, error="collection_paused" if tailer.store.pause_reasons else None, lag_bytes=lag,
-                                         gaps=tailer.gaps, gap_reason=tailer.last_gap_reason)
+                diagnostics.event_result(source_index, error="collection_paused" if tailer.store.pause_reasons else tailer.poll_error, lag_bytes=lag,
+                                         gaps=tailer.gaps, gap_reason=tailer.last_gap_reason, last_event_at=tailer.last_event_at,
+                                         skipped_events=tailer.skipped_events, parse_errors=tailer.parse_errors,
+                                         read_seconds=tailer.read_seconds, storage_seconds=tailer.storage_seconds)
         except (OSError, ValueError, sqlite3.Error) as exc:
             if diagnostics is not None:
-                diagnostics.event_result(source_index, error="permission_denied" if isinstance(exc, PermissionError) else "source_missing" if isinstance(exc, FileNotFoundError) else "source_or_storage_unavailable")
+                diagnostics.event_result(source_index, error="history_storage_unavailable" if isinstance(exc, sqlite3.Error) else "permission_denied" if isinstance(exc, PermissionError) else "source_missing" if isinstance(exc, FileNotFoundError) else "source_unavailable")
             try:
                 tailer.store.count("collector_errors")
             except sqlite3.Error:

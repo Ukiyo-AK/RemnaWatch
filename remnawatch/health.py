@@ -88,7 +88,7 @@ class PressureGuard:
                     "disk_max_used_percent": 90, "disk_min_free_bytes": 268435456,
                     "min_rotated_age_seconds": 3600, "keep_event_seconds": 3600,
                     "keep_aggregate_seconds": 86400, "max_delete_files": 100}
-        self.options = defaults | {k: v for k, v in self.settings.items() if k in defaults}
+        self.options = {**defaults, **{k: v for k, v in self.settings.items() if k in defaults}}
         o = self.options
         if not 0 < o["memory_resume_percent"] < o["memory_pause_percent"] < 100 or not 1 <= o["disk_max_used_percent"] <= 99:
             raise ValueError("invalid pressure thresholds")

@@ -37,3 +37,19 @@
 - Storage alerts имеют version=2, legacy view сохранён отдельно. Выключенный optional log source не создаёт critical; пустой каталог не создаётся. Host/live read-only API переживает startup failure SQLite; privileged mutations без durable audit недоступны. Секреты/raw exceptions/log contents не выдаются источниками диагностики.
 - CLI mapping UUID проверяется строго; изменённый mapping/legacy cursor без fingerprint пропускает неподтверждённый backlog с явным gap вместо опасного переатрибутирования. Это не полная историческая привязка по времени; нужны controlled import и прежний mapping.
 - Нативные Linux и unprivileged socket tests выполнены на ноде с Xray 26.7.28. Runtime Node 2.7.0/Xray 26.3.27, end-to-end ALTLINK/Panel 2.7.4 и нагрузка 50k реальных VPN streams не подтверждены синтетикой. Текущая P1 socket телеметрия не закрывает application-level attribution. Контракт и evidence: [LIVE_DIAGNOSTICS.md](LIVE_DIAGNOSTICS.md), [TEST_REPORT_LIVE.md](TEST_REPORT_LIVE.md).
+## Поставка 0.2.0
+
+Дополнение: новый shell bootstrap ставит недостающие зависимости при --apply /
+--install-deps, допускает Python 3.8 и расширенную матрицу Debian/Ubuntu.
+Для старых ОС требуются работающие подписанные repositories; проверенный
+Debian 11 mirror с 404 не чинится сменой зеркал или отключением trust.
+Подробные результаты: TEST_REPORT_DEBIAN_UBUNTU.md.
+
+- Матрица ОС/архитектур является целевой: реальные проверки на amd64 и fixtures не подтверждают arm64/systemd VM/все firewall и Caddy комбинации. Точный перечень — TEST_REPORT_INSTALLATION.md. Полная приёмка всего ТЗ пока не заявлена.
+- RemnaNode version discovery поддерживает однозначную release literal в bundled main.js; другие упаковки возвращают null. Нельзя вычислять версию из тега latest, списка зависимостей или единственного встреченного SemVer.
+- Установщик не выдаёт публичные сертификаты, не редактирует Caddy и не включает firewall. Сертификаты/renewal и доступ с клиентских устройств проверяет оператор. Неуправляемые legacy units требуют проверенной миграции. Отсутствующий log mount не создаётся автоматически и контейнер не пересоздаётся.
+- На проверенной ноде 2026-10-20 найден отсутствующий agent log path при существующем s6 mount; runtime loglevel=none. После попытки реального подключения лог не вырос. Свежая UUID history не подтверждена; пустой лог не подставлялся, Xray/profile не менялись.
+- User rates требуют уже работающего Xray StatsService и однозначных пользовательских counters. API/policies автоматически не включаются. Reset/набор счётчиков/gaps приводят к отсутствию данных. Эти totals не дают per-domain/per-flow bytes, TCP и UDP доли или payload.
+- UUID shaping для исследованной сборки не подтверждён: GET/POST rate-limit возвращают 501 unsupported. Применение, expiry, persistence, early revoke и migration активного лимита не реализованы без достоверного backend. Общий tc запрещён как fallback. Антиабуз — предупреждения, без автоматических санкций/рассылки.
+- Warnings хранятся в bounded RAM (500), сбрасываются при рестарте; для durable admin event history их должен импортировать backend. Правило консервативно: каждый интервал должен превышать порог непрерывно; это строже произвольного скользящего среднего.
+- transfer_seconds — время control HTTP-запроса, не измерение backend ingest. Event age при idle не ошибка. Полная latency pipeline требует отдельного времени приёма/обработки на backend.

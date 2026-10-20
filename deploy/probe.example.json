@@ -1,0 +1,9 @@
+{
+  "scheme": "https",
+  "domain": "node.example.com",
+  "host": "0.0.0.0",
+  "port": 44443,
+  "path": "/ping",
+  "certificate": "/etc/remnawatch/probe-fullchain.pem",
+  "private_key": "/etc/remnawatch/probe-key.pem"
+}
